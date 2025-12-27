@@ -1,193 +1,177 @@
-# El Toro Negro Frontend
+# Investment Platform - Инвестиционная Платформа
 
-Modern, minimalist frontend for El Toro Negro investment platform built with Next.js 14, React, and Tailwind CSS.
+Децентрализованная инвестиционная платформа на базе смарт-контрактов:
+- 💼 **Инвестиционный пул** - инвестиции от €10 с гарантированной доходностью за неделю
+- 🎰 **Лотерея** - с прозрачной логикой и безопасным выбором победителей через Chainlink VRF
+- 📈 **Ставки на цену BTC** - прогнозирование цены биткоина на конец недели
 
-## Features
+## Структура проекта
 
-- 🎨 **Minimalist Design** - Clean, Apple-inspired UI
-- 💼 **El Toro Negro** - Invest in tokenized assets from €10
-- 🎰 **Lottery** - Decentralized lottery with Chainlink VRF
-- 📈 **BTC Bets** - Predict Bitcoin price for weekly prizes
-- 🔗 **Web3 Integration** - MetaMask wallet connection
-- 📱 **Responsive** - Mobile-first design
+```
+dex_lottery/
+├── contracts/          # Смарт-контракты (Solidity)
+├── frontend/           # Frontend приложение
+├── tests/              # Тесты для контрактов
+├── scripts/            # Скрипты для деплоя
+└── docs/               # Документация
+```
 
-## Tech Stack
+## Основные компоненты
 
-- **Next.js 14** - React framework with App Router
-- **TypeScript** - Type safety
-- **Tailwind CSS** - Utility-first CSS framework
-- **Ethers.js v6** - Ethereum library for Web3 integration
-- **React Hooks** - Custom hooks for wallet and contract interactions
+### Smart Contracts
 
-## Getting Started
+#### Lottery / LotteryV2
+- Управление лотереями (создание, участие, определение победителя)
+- Безопасное хранение средств
+- Прозрачная логика выбора победителей (Chainlink VRF)
+- Управление доступом (owner functions)
 
-### Prerequisites
+#### BitcoinPriceBet
+- Ставки на цену биткоина (понедельник-пятница)
+- Интеграция Chainlink Price Feeds для получения цены BTC/USD
+- Автоматическое определение победителей (ближайшие к реальной цене)
+- Распределение призов между победителями
 
-- Node.js 18+ 
-- npm or yarn
-- MetaMask browser extension (for testing)
+#### InvestmentPool
+- Инвестиционный пул для вложений от €10 эквивалента
+- Период инвестирования 7 дней с гарантированной доходностью
+- Настраиваемая процентная ставка (например, 12.5% за неделю)
+- Комиссия платформы с процентов (настраиваемая, максимум 5%)
+- Управление инвестициями и вывод средств
 
-### Installation
+### Frontend
+- 💼 **Инвестиционная платформа** - инвестиции от €10 в токенизированные активы
+- 🎰 **Лотерея** - покупка билетов и участие в розыгрышах
+- 📈 **Ставки на BTC** - прогнозирование цены биткоина
+- 🔗 **Web3 интеграция** - подключение MetaMask, взаимодействие со смарт-контрактами
+- 📱 **Адаптивный дизайн** - работает на всех устройствах
 
+## Технологический стек
+
+### Контракты
+- Solidity ^0.8.0
+- Hardhat (разработка и тестирование)
+- Chainlink VRF (случайные числа)
+
+### Frontend
+- React/Next.js
+- Web3.js/Ethers.js
+- MetaMask integration
+
+## Разработка
+
+### Установка зависимостей
 ```bash
-cd frontend
 npm install
 ```
 
-### Development
-
+### Компиляция контрактов
 ```bash
-npm run dev
+npm run compile
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
-
-### Environment Variables
-
-Create a `.env.local` file in the `frontend` directory:
-
-```env
-NEXT_PUBLIC_INVESTMENT_POOL_ADDRESS=0x...
-NEXT_PUBLIC_LOTTERY_ADDRESS=0x...
-NEXT_PUBLIC_BTC_BET_ADDRESS=0x...
-NEXT_PUBLIC_CHAIN_ID=1337
-NEXT_PUBLIC_RPC_URL=http://localhost:8545
-```
-
-### Build
-
+### Запуск тестов
 ```bash
-npm run build
-npm start
+npm run test
 ```
 
-## Project Structure
+### Деплой
 
-```
-frontend/
-├── app/                           # Next.js App Router
-│   ├── layout.tsx                # Root layout
-│   ├── page.tsx                  # Home page
-│   ├── my-investments/           # My Investments page
-│   ├── lottery/                  # Lottery page
-│   └── btc-bets/                 # BTC bets page
-├── components/                    # React components
-│   ├── Header.tsx                # Navigation header
-│   ├── Footer.tsx                # Footer
-│   ├── WalletButton.tsx          # Web3 wallet connection
-│   ├── Hero.tsx                  # Hero section
-│   ├── InvestmentOptionsWithContract.tsx  # Investment UI with contract integration
-│   ├── MyInvestmentsSection.tsx  # User investments management
-│   ├── Features.tsx              # Features section
-│   ├── Stats.tsx                 # Statistics
-│   ├── LotterySection.tsx        # Lottery UI
-│   └── BTCBetsSection.tsx        # BTC bets UI
-├── hooks/                         # Custom React hooks
-│   ├── useWallet.ts              # Wallet connection hook
-│   └── useInvestmentPool.ts      # Investment pool contract hook
-├── lib/                           # Utilities
-│   └── contracts.ts              # Contract ABIs and helper functions
-└── public/                        # Static assets
-```
-
-## Web3 Integration
-
-The frontend uses Ethers.js v6 to interact with Ethereum smart contracts:
-
-### Hooks
-
-- **useWallet** - Manages MetaMask wallet connection
-  - `connect()` - Connect wallet
-  - `disconnect()` - Disconnect wallet
-  - `account` - Current connected address
-  - `isConnected` - Connection status
-
-- **useInvestmentPool** - Manages InvestmentPool contract interactions
-  - `invest(amount)` - Make investment
-  - `withdraw(index)` - Withdraw specific investment
-  - `withdrawAll()` - Withdraw all available investments
-  - `getUserStats(address)` - Get user statistics
-  - `getUserInvestments(address)` - Get user investments list
-  - `poolStats` - Pool statistics
-  - `minInvestment` - Minimum investment amount
-
-### Contract Addresses
-
-Contract addresses are configured via environment variables:
-- `NEXT_PUBLIC_INVESTMENT_POOL_ADDRESS`
-- `NEXT_PUBLIC_LOTTERY_ADDRESS`
-- `NEXT_PUBLIC_BTC_BET_ADDRESS`
-
-## Pages
-
-### Home (`/`)
-- Investment options selection
-- Investment form with contract integration
-- User investment statistics
-- Pool statistics
-
-### My Investments (`/my-investments`)
-- View all user investments
-- Available investments ready for withdrawal
-- Active investments with countdown
-- Withdraw individual or all investments
-- Investment history
-
-### Lottery (`/lottery`)
-- View lottery status
-- Purchase lottery tickets
-- View prize pool
-
-### BTC Bets (`/btc-bets`)
-- Current BTC price
-- Place bet on BTC price
-- View betting status
-
-## Design Principles
-
-- **Minimalism** - Clean, uncluttered interface
-- **Accessibility** - WCAG compliant
-- **Performance** - Optimized for speed
-- **Responsiveness** - Works on all devices
-
-## Development Notes
-
-### Testing with Hardhat Local Node
-
-1. Start Hardhat local node:
+**Контракты:**
 ```bash
-cd ..
-npx hardhat node
+# Лотерея
+npm run deploy
+
+# Ставки на цену BTC
+npx hardhat run scripts/deployBitcoinBet.js
 ```
 
-2. Deploy contracts to local network:
-```bash
-npx hardhat run scripts/deployInvestmentPool.js --network localhost
-```
-
-3. Update `.env.local` with deployed contract addresses
-
-4. Start frontend:
+**Frontend:**
 ```bash
 cd frontend
+npm install
 npm run dev
 ```
 
-5. Connect MetaMask to `http://localhost:8545`
-6. Import test accounts from Hardhat output
+Подробнее:
+- [Руководство по деплою](docs/DEPLOYMENT.md)
+- [Документация по ставкам на BTC](docs/BITCOIN_PRICE_BET.md)
+- [Документация по инвестиционному пулу](docs/INVESTMENT_POOL.md)
+- [Frontend документация](frontend/README.md)
 
-## Deployment
+## Текущий статус
 
-The frontend can be deployed to:
+✅ **Выполнено:**
+- Базовая структура проекта
+- **Lottery / LotteryV2** - контракты лотереи с интеграцией Chainlink VRF v2
+- **BitcoinPriceBet** - контракт ставок на цену биткоина с Chainlink Price Feeds
+- **InvestmentPool** - контракт инвестиционного пула с недельной доходностью
+- **Frontend приложение** - Next.js 14 приложение с инвестиционным интерфейсом
+- Защита от повторного входа (ReentrancyGuard)
+- Emergency pause механизм (LotteryV2, BitcoinPriceBet, InvestmentPool)
+- Скрипты деплоя для всех контрактов
+- Базовые unit-тесты для лотереи (15 тестов проходят)
+- Полная документация
 
-- **Vercel** (recommended for Next.js)
-- **Netlify**
-- Any static hosting service
+⏭️ **В разработке:**
+- Полная интеграция frontend со смарт-контрактами (InvestmentPool, Lottery, BTC Bets)
+- Расширенные тесты для всех контрактов
+- Интеграционные тесты с VRF mock
+- Аудит безопасности контрактов
+- Токенизация активов (акции, золото, нефть)
 
-```bash
-npm run build
-```
+## Безопасность
 
-## License
+⚠️ **Важно**: Перед деплоем в mainnet обязательно:
+- Провести аудит контрактов
+- Протестировать на testnet
+- Проверить логику выбора победителей
+- Убедиться в корректной работе VRF
 
-MIT
+⚠️ **Критические предупреждения:**
+
+**Chainlink VRF:**
+- Требуется Chainlink Subscription с достаточным балансом LINK токенов
+- После деплоя необходимо добавить контракт как consumer в subscription
+- Если subscription опустеет, выбор победителя не сможет завершиться
+- Рекомендуется поддерживать баланс минимум 1-2 LINK
+
+**Управление доступом:**
+- Owner имеет полный контроль над лотереей (вызов `requestWinnerSelection`)
+- Приватный ключ owner должен храниться максимально безопасно
+- Потеря доступа к owner = невозможность завершить лотерею
+- Рекомендуется использовать мультисиг или hardware wallet для owner
+
+**Ограничения текущей реализации:**
+- Нет механизма возврата средств, если лотерея не завершится
+- Нет таймаутов - лотерея может оставаться в статусе `pendingWinnerSelection` неограниченно долго
+- Контракт не upgradeable - параметры (цена билета, maxTickets) фиксированы после деплоя
+- Нет emergency pause механизма
+
+**Экономические риски:**
+- Gas costs могут быть значительными для пользователей
+- Все билеты и участники видны публично (прозрачность блокчейна)
+- Нет комиссии для owner - все средства идут победителю
+- При большом количестве билетов gas может стать неподъемным
+
+**Юридические аспекты:**
+- Лотереи могут быть регулируемы в вашей юрисдикции
+- Убедитесь в соответствии местному законодательству
+- Рассмотрите возможность блокировки по геолокации, если требуется
+- Этот контракт предоставляется "как есть", без гарантий
+
+**Рекомендации для production:**
+- ✅ Реализовано: Механизм таймаутов с автоматическим возвратом средств (`LotteryV2.sol`)
+- ✅ Реализовано: Emergency pause функция (`LotteryV2.sol`)
+- ✅ Реализовано: Комиссия для покрытия операционных расходов (`LotteryV2.sol`)
+- ⏭️ Рассмотрите возможность сделать контракт upgradeable (через proxy)
+- ⏭️ Реализуйте мониторинг состояния subscription и уведомления
+
+**📦 Улучшенная версия:**
+Для production рекомендуется использовать `LotteryV2.sol`, который включает все критичные улучшения. 
+Подробнее: [Production Improvements](docs/PRODUCTION_IMPROVEMENTS.md)
+
+**📝 Журнал разработки:**
+Все изменения проекта документируются в [CHANGELOG.md](CHANGELOG.md). 
+Руководство по ведению журнала: [CHANGELOG_GUIDE.md](docs/CHANGELOG_GUIDE.md)
+
