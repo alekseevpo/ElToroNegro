@@ -7,7 +7,10 @@ import { useAuth } from '@/contexts/AuthContext';
 import AnimatedCounter from './AnimatedCounter';
 import FundsChart from './FundsChart';
 import { generateRandomUsername } from '@/lib/ton-utils';
-import { addTransaction } from '@/lib/profile-utils';
+import { addTransaction, getUserProfile, initializeProfile, addToPortfolio } from '@/lib/profile-utils';
+import { fetchCryptoPrice } from '@/lib/price-api';
+import { ethers } from 'ethers';
+import { getSigner } from '@/lib/contracts';
 
 interface ActivityMessage {
   id: string;
@@ -16,13 +19,47 @@ interface ActivityMessage {
 }
 
 function BuyTokensSection() {
-  const { user } = useAuth();
+  const { user, refreshBalance } = useAuth();
   const { account, connect, isConnected } = useWallet();
+  
+  // Адреса для приема платежей (можно настроить через переменные окружения)
+  const treasuryAddress = process.env.NEXT_PUBLIC_TREASURY_ADDRESS || '0x0000000000000000000000000000000000000000';
+  
+  // Адреса контрактов токенов (ERC-20)
+  const tokenAddresses = {
+    USDT: process.env.NEXT_PUBLIC_USDT_ADDRESS || '0xdAC17F958D2ee523a2206206994597C13D831ec7', // Mainnet USDT
+    WBTC: process.env.NEXT_PUBLIC_WBTC_ADDRESS || '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599', // Mainnet WBTC
+  };
+  
+  // ABI для ERC-20 токенов (только необходимые функции)
+  const ERC20_ABI = [
+    'function balanceOf(address owner) view returns (uint256)',
+    'function decimals() view returns (uint8)',
+    'function transfer(address to, uint256 amount) returns (bool)',
+    'function approve(address spender, uint256 amount) returns (bool)',
+    'function allowance(address owner, address spender) view returns (uint256)',
+  ];
+  
+  // Получить адрес сети для Etherscan (по умолчанию Sepolia для тестирования)
+  const getEtherscanUrl = (txHash: string) => {
+    const chainId = typeof window !== 'undefined' && (window as any).ethereum 
+      ? (window as any).ethereum.chainId 
+      : null;
+    
+    if (chainId === '0x1' || chainId === '0x1') {
+      return `https://etherscan.io/tx/${txHash}`;
+    } else if (chainId === '0xaa36a7' || chainId === '11155111') {
+      return `https://sepolia.etherscan.io/tx/${txHash}`;
+    } else {
+      return `https://etherscan.io/tx/${txHash}`;
+    }
+  };
   const searchParams = useSearchParams();
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'crypto'>('card');
+  const [cryptoCurrency, setCryptoCurrency] = useState<'ETH' | 'USDT' | 'WBTC'>('ETH');
   const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+  const [message, setMessage] = useState<{ type: 'success' | 'error', text: string, etherscanUrl?: string } | null>(null);
   const [totalRaised, setTotalRaised] = useState<number>(111291.00); // Начальное значение
   const [activityMessages, setActivityMessages] = useState<ActivityMessage[]>([]);
   const messagesRef = useRef<ActivityMessage[]>([]);
@@ -40,6 +77,13 @@ function BuyTokensSection() {
       setMessage({ type: 'error', text: 'Payment was canceled' });
     }
   }, [searchParams]);
+
+  // Обновить баланс при загрузке компонента и при изменении пользователя
+  useEffect(() => {
+    if (user?.address) {
+      refreshBalance();
+    }
+  }, [user?.address, refreshBalance]);
 
   const verifyPayment = async (sessionId: string) => {
     try {
@@ -194,10 +238,267 @@ function BuyTokensSection() {
           setLoading(false);
           return;
         }
-        // Здесь будет логика покупки за криптовалюту
-        // Пока просто имитация
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        setMessage({ type: 'success', text: `Successfully purchased ${parseFloat(amount)} $TAI tokens!` });
+        
+        if (!user?.address) {
+          throw new Error('Wallet not connected. Please connect your wallet first.');
+        }
+        
+        // Проверка адреса казначейства
+        if (!treasuryAddress || treasuryAddress === '0x0000000000000000000000000000000000000000') {
+          throw new Error('Treasury address not configured. Please contact support.');
+        }
+        
+        // Проверка, что treasury address не равен адресу пользователя
+        if (treasuryAddress.toLowerCase() === user.address.toLowerCase()) {
+          console.warn('Warning: Treasury address is the same as user address. Transaction will be sent to yourself.');
+          // Это нормально для тестирования, но предупреждаем пользователя
+        }
+        
+        const amountInEur = parseFloat(amount);
+        
+        // Проверить текущую сеть напрямую из MetaMask
+        if (typeof window === 'undefined' || !(window as any).ethereum) {
+          throw new Error('MetaMask not found. Please install MetaMask.');
+        }
+        
+        const ethereum = (window as any).ethereum;
+        const chainId = await ethereum.request({ method: 'eth_chainId' });
+        const sepoliaChainIdHex = '0xaa36a7'; // Sepolia chain ID in hex
+        
+        if (chainId !== sepoliaChainIdHex) {
+          // Попробовать переключить на Sepolia
+          try {
+            await ethereum.request({
+              method: 'wallet_switchEthereumChain',
+              params: [{ chainId: sepoliaChainIdHex }],
+            });
+            // Подождать немного для переключения сети
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          } catch (switchError: any) {
+            // Если сеть не добавлена, добавить её
+            if (switchError.code === 4902) {
+              await ethereum.request({
+                method: 'wallet_addEthereumChain',
+                params: [{
+                  chainId: sepoliaChainIdHex,
+                  chainName: 'Sepolia Test Network',
+                  nativeCurrency: {
+                    name: 'SepoliaETH',
+                    symbol: 'ETH',
+                    decimals: 18
+                  },
+                  rpcUrls: ['https://rpc.sepolia.org'],
+                  blockExplorerUrls: ['https://sepolia.etherscan.io']
+                }],
+              });
+            } else {
+              throw new Error(`Please switch to Sepolia testnet in MetaMask. Current chain ID: ${chainId}.`);
+            }
+          }
+        }
+        
+        // Получить signer для отправки транзакции (после проверки сети)
+        const signer = await getSigner();
+        if (!signer) {
+          throw new Error('Failed to get wallet signer. Please connect your wallet.');
+        }
+        
+        let tx: ethers.ContractTransactionResponse;
+        let cryptoAmount: number;
+        let cryptoSymbol: string;
+        
+        if (cryptoCurrency === 'ETH') {
+          // Получить курс ETH/EUR
+          const ethPriceData = await fetchCryptoPrice('ETH');
+          if (!ethPriceData || !ethPriceData.price) {
+            throw new Error('Failed to fetch ETH price. Please try again.');
+          }
+          
+          const ethPriceInEur = ethPriceData.price;
+          cryptoAmount = amountInEur / ethPriceInEur;
+          cryptoSymbol = 'ETH';
+          
+          // Проверить баланс пользователя
+          console.log('Checking balance for address:', user.address);
+          const balance = await signer.provider.getBalance(user.address);
+          const balanceInEth = parseFloat(ethers.formatEther(balance));
+          console.log('Balance from provider:', balanceInEth, 'ETH');
+          
+          // Получить информацию о сети для отладки
+          const networkInfo = await signer.provider.getNetwork();
+          console.log('Current network:', networkInfo.name, 'Chain ID:', networkInfo.chainId.toString());
+          
+          if (balanceInEth < cryptoAmount) {
+            throw new Error(`Insufficient balance. You need ${cryptoAmount.toFixed(6)} ETH but have ${balanceInEth.toFixed(6)} ETH.`);
+          }
+          
+          // Отправить транзакцию ETH
+          setMessage({ 
+            type: 'success', 
+            text: `Sending ${cryptoAmount.toFixed(6)} ETH (€${amountInEur.toFixed(2)})... Please confirm in MetaMask.` 
+          });
+          
+          // Логирование для отладки
+          console.log('Sending transaction to treasury address:', treasuryAddress);
+          console.log('User address:', user.address);
+          console.log('Amount:', cryptoAmount.toFixed(18), 'ETH');
+          
+          tx = await signer.sendTransaction({
+            to: treasuryAddress,
+            value: ethers.parseEther(cryptoAmount.toFixed(18)),
+          });
+        } else {
+          // Для USDT и WBTC - работа с ERC-20 токенами
+          const tokenAddress = tokenAddresses[cryptoCurrency];
+          if (!tokenAddress || tokenAddress === '0x0000000000000000000000000000000000000000') {
+            throw new Error(`${cryptoCurrency} token address not configured. Please contact support.`);
+          }
+          
+          // Получить курс токена/EUR
+          const tokenSymbol = cryptoCurrency === 'WBTC' ? 'BTC' : cryptoCurrency;
+          const tokenPriceData = await fetchCryptoPrice(tokenSymbol);
+          if (!tokenPriceData || !tokenPriceData.price) {
+            throw new Error(`Failed to fetch ${cryptoCurrency} price. Please try again.`);
+          }
+          
+          const tokenPriceInEur = tokenPriceData.price;
+          cryptoAmount = amountInEur / tokenPriceInEur;
+          cryptoSymbol = cryptoCurrency;
+          
+          // Получить контракт токена
+          const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, signer);
+          
+          // Получить decimals токена
+          const decimals = await tokenContract.decimals();
+          const decimalsNumber = Number(decimals);
+          const amountInWei = ethers.parseUnits(cryptoAmount.toFixed(decimalsNumber), decimalsNumber);
+          
+          // Проверить баланс пользователя
+          const balance = await tokenContract.balanceOf(user.address);
+          const balanceFormatted = parseFloat(ethers.formatUnits(balance, decimalsNumber));
+          
+          if (balanceFormatted < cryptoAmount) {
+            const shortfall = cryptoAmount - balanceFormatted;
+            throw new Error(
+              `Insufficient ${cryptoCurrency} balance.\n` +
+              `Required: ${cryptoAmount.toFixed(6)} ${cryptoCurrency} (€${amountInEur.toFixed(2)})\n` +
+              `Your balance: ${balanceFormatted.toFixed(6)} ${cryptoCurrency}\n` +
+              `Shortfall: ${shortfall.toFixed(6)} ${cryptoCurrency}\n\n` +
+              `Please add ${cryptoCurrency} to your wallet to complete this purchase.`
+            );
+          }
+          
+          // Проверить allowance (разрешение на перевод)
+          const allowance = await tokenContract.allowance(user.address, treasuryAddress);
+          
+          // Если allowance недостаточно, нужно одобрить
+          if (allowance < amountInWei) {
+            setMessage({ 
+              type: 'success', 
+              text: `Approving ${cryptoCurrency} transfer... Please confirm in MetaMask.` 
+            });
+            
+            // Одобрить максимальное количество (или можно одобрить только нужное)
+            const approveTx = await tokenContract.approve(treasuryAddress, ethers.MaxUint256);
+            await approveTx.wait();
+          }
+          
+          // Отправить транзакцию перевода токенов
+          setMessage({ 
+            type: 'success', 
+            text: `Sending ${cryptoAmount.toFixed(6)} ${cryptoCurrency} (€${amountInEur.toFixed(2)})... Please confirm in MetaMask.` 
+          });
+          
+          tx = await tokenContract.transfer(treasuryAddress, amountInWei);
+        }
+        
+        const txHash = tx.hash;
+        setMessage({ 
+          type: 'success', 
+          text: `Transaction sent! Waiting for confirmation... (${txHash.slice(0, 10)}...)` 
+        });
+        
+        // Дождаться подтверждения
+        const receipt = await tx.wait();
+        
+        if (receipt && receipt.status === 1) {
+          // Транзакция успешна
+          const finalTxHash = receipt.hash;
+          const etherscanUrl = getEtherscanUrl(finalTxHash);
+          
+          // Получить курс для сохранения в метаданных
+          const tokenSymbol = cryptoCurrency === 'WBTC' ? 'BTC' : cryptoCurrency;
+          const priceData = await fetchCryptoPrice(tokenSymbol);
+          const priceInEur = priceData?.price || 0;
+          
+          // Добавить транзакцию в историю
+          if (user.address) {
+            // Убедиться, что профиль существует перед добавлением транзакции
+            let profile = getUserProfile(user.address);
+            if (!profile) {
+              // Создать профиль с дефолтным username, если его нет
+              const defaultUsername = `user_${user.address.slice(2, 8)}`;
+              profile = initializeProfile(user.address, defaultUsername);
+              console.log('Profile created for transaction:', user.address);
+            }
+            
+            const tokensAmount = parseFloat(amount);
+            const transaction = await addTransaction(user.address, {
+              type: 'token_purchase',
+              status: 'completed',
+              amount: amountInEur.toFixed(2),
+              currency: 'EUR',
+              tokensAmount: tokensAmount.toFixed(2),
+              description: `Purchased ${tokensAmount.toFixed(2)} $TAI tokens with ${cryptoAmount.toFixed(6)} ${cryptoSymbol}`,
+              txHash: finalTxHash,
+              paymentMethod: 'crypto',
+              metadata: {
+                cryptoAmount: cryptoAmount.toFixed(6),
+                cryptoCurrency: cryptoSymbol,
+                priceInEur: priceInEur,
+                etherscanUrl: etherscanUrl,
+              },
+            });
+            
+            if (transaction) {
+              console.log('Transaction saved successfully:', transaction.id);
+              
+              // Добавить токены в портфель
+              // Цена 1 $TAI токена = 1 EUR (фиксированная цена)
+              const tokenPricePerUnit = 1; // 1 $TAI = 1 EUR
+              await addToPortfolio(user.address, {
+                type: 'token',
+                symbol: 'TAI',
+                name: 'Tokenized Asset Investment',
+                quantity: tokensAmount,
+                purchasePrice: tokenPricePerUnit,
+                currentPrice: tokenPricePerUnit, // Текущая цена равна цене покупки (1 EUR)
+                purchaseDate: Date.now(),
+                currency: 'EUR',
+                totalCost: amountInEur, // Стоимость покупки в EUR
+              });
+              
+              console.log(`Added ${tokensAmount} $TAI tokens to portfolio`);
+            } else {
+              console.error('Failed to save transaction');
+            }
+          }
+          
+          setMessage({ 
+            type: 'success', 
+            text: `Successfully purchased ${parseFloat(amount).toFixed(2)} $TAI tokens!`,
+            etherscanUrl: etherscanUrl,
+          });
+          
+          // Очистить поле суммы
+          setAmount('');
+          setLoading(false);
+          
+          // Показать ссылку на Etherscan в консоли для отладки
+          console.log(`Transaction confirmed: ${etherscanUrl}`);
+        } else {
+          throw new Error('Transaction failed. Please try again.');
+        }
       } else {
         // Create Stripe Checkout Session
         const response = await fetch('/api/stripe/create-checkout', {
@@ -415,7 +716,6 @@ function BuyTokensSection() {
               )}
             </div>
           </div>
-        </div>
 
         <div className="bg-primary-gray rounded-2xl shadow-xl border border-primary-gray-light p-8 md:p-12">
           {/* Payment Method Selection */}
@@ -447,10 +747,61 @@ function BuyTokensSection() {
               >
                 <div className="text-2xl mb-2">₿</div>
                 <div className="font-semibold text-white">Cryptocurrency</div>
-                <div className="text-sm text-primary-gray-lighter mt-1">ETH, USDT, USDC</div>
+                <div className="text-sm text-primary-gray-lighter mt-1">ETH, USDT, WBTC</div>
               </button>
             </div>
           </div>
+
+          {/* Crypto Currency Selection */}
+          {paymentMethod === 'crypto' && isConnected && (
+            <div className="mb-8">
+              <label className="block text-sm font-medium text-primary-gray-lighter mb-4">
+                Select Cryptocurrency
+              </label>
+              <div className="grid grid-cols-3 gap-4">
+                <button
+                  onClick={() => setCryptoCurrency('ETH')}
+                  className={`p-4 rounded-xl border-2 transition-all ${
+                    cryptoCurrency === 'ETH'
+                      ? 'border-accent-yellow bg-black'
+                      : 'border-primary-gray-light hover:border-accent-yellow'
+                  }`}
+                >
+                  <div className="font-semibold text-white mb-1">ETH</div>
+                  <div className="text-xs text-primary-gray-lighter">Ethereum</div>
+                </button>
+                
+                <button
+                  onClick={() => setCryptoCurrency('USDT')}
+                  className={`p-4 rounded-xl border-2 transition-all ${
+                    cryptoCurrency === 'USDT'
+                      ? 'border-accent-yellow bg-black'
+                      : 'border-primary-gray-light hover:border-accent-yellow'
+                  }`}
+                >
+                  <div className="font-semibold text-white mb-1">USDT</div>
+                  <div className="text-xs text-primary-gray-lighter">Tether</div>
+                </button>
+                
+                <button
+                  onClick={() => setCryptoCurrency('WBTC')}
+                  className={`p-4 rounded-xl border-2 transition-all ${
+                    cryptoCurrency === 'WBTC'
+                      ? 'border-accent-yellow bg-black'
+                      : 'border-primary-gray-light hover:border-accent-yellow'
+                  }`}
+                >
+                  <div className="font-semibold text-white mb-1">WBTC</div>
+                  <div className="text-xs text-primary-gray-lighter">Wrapped Bitcoin</div>
+                </button>
+              </div>
+              <p className="mt-2 text-xs text-primary-gray-lighter">
+                {cryptoCurrency === 'WBTC' && 'WBTC is Bitcoin on Ethereum network. Use this to pay with Bitcoin.'}
+                {cryptoCurrency === 'USDT' && 'USDT (Tether) - Stablecoin pegged to USD.'}
+                {cryptoCurrency === 'ETH' && 'ETH (Ethereum) - Native Ethereum cryptocurrency.'}
+              </p>
+            </div>
+          )}
 
           {/* Amount Input */}
           <div className="mb-8">
@@ -496,7 +847,19 @@ function BuyTokensSection() {
                 ? 'bg-primary-gray border border-accent-yellow text-accent-yellow'
                 : 'bg-primary-gray border border-red-500 text-red-400'
             }`}>
-              {message.text}
+              <div className="flex items-start justify-between gap-4">
+                <p>{message.text}</p>
+                {message.etherscanUrl && (
+                  <a
+                    href={message.etherscanUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-accent-yellow hover:text-accent-yellow-light underline text-sm whitespace-nowrap flex-shrink-0"
+                  >
+                    View on Etherscan →
+                  </a>
+                )}
+              </div>
             </div>
           )}
 

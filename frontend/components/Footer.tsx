@@ -17,7 +17,6 @@ export default function Footer() {
             <ul className="space-y-2 text-sm text-primary-gray-lighter">
               <li><Link href="/" className="hover:text-accent-yellow transition-colors">Invest</Link></li>
               <li><Link href="/buy-tokens" className="hover:text-accent-yellow transition-colors">Buy Tokens</Link></li>
-              <li><Link href="/my-investments" className="hover:text-accent-yellow transition-colors">My Investments</Link></li>
               <li><Link href="/mission" className="hover:text-accent-yellow transition-colors">Mission</Link></li>
               <li><Link href="/lottery" className="hover:text-accent-yellow transition-colors">Lottery</Link></li>
               <li><Link href="/btc-bets" className="hover:text-accent-yellow transition-colors">BTC Bets</Link></li>

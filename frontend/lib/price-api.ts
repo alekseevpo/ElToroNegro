@@ -12,6 +12,8 @@ export interface AssetPriceData {
 const CRYPTO_MAPPING: Record<string, string> = {
   'BTC': 'bitcoin',
   'ETH': 'ethereum',
+  'USDT': 'tether',
+  'WBTC': 'wrapped-bitcoin',
   'BNB': 'binancecoin',
 };
 

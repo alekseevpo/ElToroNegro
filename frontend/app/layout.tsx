@@ -6,7 +6,7 @@ import AnimatedGradientBackground from '@/components/AnimatedGradientBackground'
 
 export const metadata: Metadata = {
   title: 'El Toro Negro - Invest in Tokenized Assets',
-  description: 'Invest from €10 and earn returns. Trade tokenized stocks, gold, oil, and other assets.',
+  description: 'Invest from 10 EUR and earn returns. Trade tokenized stocks, gold, oil, and other assets.',
 };
 
 export default function RootLayout({
@@ -15,8 +15,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
-      <body className="antialiased bg-white text-gray-900">
+    <html lang="en" suppressHydrationWarning>
+      <body className="antialiased bg-white text-gray-900" suppressHydrationWarning>
         <AnimatedGradientBackground />
         <TonConnectProvider>
           <AuthProvider>

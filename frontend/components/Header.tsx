@@ -16,7 +16,6 @@ export default function Header() {
   const baseNavigation = [
     { name: 'Invest', href: '/' },
     { name: 'Buy Tokens', href: '/buy-tokens' },
-    { name: 'My Investments', href: '/my-investments' },
     { name: 'Mission', href: '/mission' },
     { name: 'Lottery', href: '/lottery' },
     { name: 'BTC Bets', href: '/btc-bets' },

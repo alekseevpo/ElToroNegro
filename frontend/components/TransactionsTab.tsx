@@ -14,6 +14,11 @@ export default function TransactionsTab({ account }: TransactionsTabProps) {
 
   useEffect(() => {
     loadTransactions();
+    // Обновлять транзакции каждые 2 секунды для отображения новых
+    const interval = setInterval(() => {
+      loadTransactions();
+    }, 2000);
+    return () => clearInterval(interval);
   }, [account, filter]);
 
   const loadTransactions = () => {

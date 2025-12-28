@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, memo, useCallback } from 'react';
 import Link from 'next/link';
 import { useInvestmentPool } from '@/hooks/useInvestmentPool';
 import { useAuth } from '@/contexts/AuthContext';

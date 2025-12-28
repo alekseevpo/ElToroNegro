@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useInvestmentPool } from '@/hooks/useInvestmentPool';
 import { useAuth } from '@/contexts/AuthContext';
+import { getPortfolio } from '@/lib/profile-utils';
 import { ethers } from 'ethers';
 
 // Lazy load heavy tabs for code splitting
@@ -27,6 +28,7 @@ function DashboardSection() {
   const [userStats, setUserStats] = useState<any>(null);
   const [investments, setInvestments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [taiTokenBalance, setTaiTokenBalance] = useState<number>(0);
   const [activeTab, setActiveTab] = useState<'overview' | 'investments' | 'referrals' | 'transactions' | 'profile'>('overview');
 
   useEffect(() => {
@@ -37,6 +39,15 @@ function DashboardSection() {
     }
   }, [account, isConnected]);
 
+  // Обновить баланс токенов при переходе на Overview
+  useEffect(() => {
+    if (account && activeTab === 'overview') {
+      const portfolio = getPortfolio(account);
+      const taiAsset = portfolio.find(asset => asset.symbol === 'TAI' && asset.type === 'token');
+      setTaiTokenBalance(taiAsset ? taiAsset.quantity : 0);
+    }
+  }, [account, activeTab]);
+
   const loadData = async () => {
     if (!account) return;
     setLoading(true);
@@ -46,6 +57,11 @@ function DashboardSection() {
 
       const userInvestments = await getUserInvestments(account);
       setInvestments(userInvestments);
+      
+      // Загрузить баланс $TAI токенов из портфеля
+      const portfolio = getPortfolio(account);
+      const taiAsset = portfolio.find(asset => asset.symbol === 'TAI' && asset.type === 'token');
+      setTaiTokenBalance(taiAsset ? taiAsset.quantity : 0);
       
       await refreshBalance();
     } catch (error: any) {
@@ -132,7 +148,7 @@ function DashboardSection() {
         {activeTab === 'overview' && (
           <div className="space-y-6">
             {/* Stats Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
               <div className="bg-primary-gray rounded-xl p-6 shadow-sm border border-primary-gray-light">
                 <div className="flex items-center justify-between">
                   <div>
@@ -141,8 +157,8 @@ function DashboardSection() {
                       {user?.balance ? parseFloat(user.balance).toFixed(4) : '0.0000'} ETH
                     </p>
                   </div>
-                  <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                    <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <div className="w-12 h-12 bg-primary-gray-light rounded-lg flex items-center justify-center">
+                    <svg className="w-6 h-6 text-accent-yellow" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
                   </div>
@@ -187,6 +203,22 @@ function DashboardSection() {
                     <p className="text-sm text-primary-gray-lighter mb-1">Total Profit</p>
                     <p className="text-2xl font-bold text-accent-yellow">
                       +{totalProfit.toFixed(4)} ETH
+                    </p>
+                  </div>
+                  <div className="w-12 h-12 bg-primary-gray-light rounded-lg flex items-center justify-center">
+                    <svg className="w-6 h-6 text-accent-yellow" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-primary-gray rounded-xl p-6 shadow-sm border border-primary-gray-light">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-primary-gray-lighter mb-1">$TAI Tokens</p>
+                    <p className="text-2xl font-bold text-accent-yellow">
+                      {taiTokenBalance.toFixed(2)} $TAI
                     </p>
                   </div>
                   <div className="w-12 h-12 bg-primary-gray-light rounded-lg flex items-center justify-center">
