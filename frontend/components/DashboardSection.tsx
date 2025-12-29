@@ -39,6 +39,31 @@ function DashboardSection() {
   const [activeTab, setActiveTab] = useState<'overview' | 'investments' | 'referrals' | 'transactions' | 'profile'>('overview');
   const [kycBannerDismissed, setKycBannerDismissed] = useState<boolean>(false);
 
+  const loadData = useCallback(async () => {
+    if (!account) return;
+    setLoading(true);
+    try {
+      const stats = await getUserStats(account);
+      setUserStats(stats);
+
+      const userInvestments = await getUserInvestments(account);
+      setInvestments(userInvestments);
+      
+      // Загрузить баланс $TAI токенов из портфеля
+      if (profile) {
+        const portfolio = profile.portfolio || [];
+        const taiAsset = portfolio.find(asset => asset.symbol === 'TAI' && asset.type === 'token');
+        setTaiTokenBalance(taiAsset ? taiAsset.quantity : 0);
+      }
+      
+      await refreshBalance();
+    } catch (error: unknown) {
+      logger.error('Error loading dashboard data', error, { account });
+    } finally {
+      setLoading(false);
+    }
+  }, [account, getUserStats, getUserInvestments, profile, refreshBalance]);
+
   useEffect(() => {
     if (account && isConnected) {
       loadData();
@@ -72,31 +97,6 @@ function DashboardSection() {
     }
   }, [account, activeTab, profile]);
 
-  const loadData = useCallback(async () => {
-    if (!account) return;
-    setLoading(true);
-    try {
-      const stats = await getUserStats(account);
-      setUserStats(stats);
-
-      const userInvestments = await getUserInvestments(account);
-      setInvestments(userInvestments);
-      
-      // Загрузить баланс $TAI токенов из портфеля
-      if (profile) {
-        const portfolio = profile.portfolio || [];
-        const taiAsset = portfolio.find(asset => asset.symbol === 'TAI' && asset.type === 'token');
-        setTaiTokenBalance(taiAsset ? taiAsset.quantity : 0);
-      }
-      
-      await refreshBalance();
-    } catch (error: unknown) {
-      logger.error('Error loading dashboard data', error, { account });
-    } finally {
-      setLoading(false);
-    }
-  }, [account, getUserStats, getUserInvestments, profile, refreshBalance]);
-
   const formatAddress = useCallback((address: string) => {
     if (!address) return '';
     return `${address.slice(0, 6)}...${address.slice(-4)}`;
@@ -110,6 +110,22 @@ function DashboardSection() {
       day: 'numeric'
     });
   };
+
+  // Все хуки должны быть вызваны ДО любых условных возвратов
+  const activeInvestments = useMemo(() => 
+    investments.filter(inv => !inv.withdrawn && Date.now() < inv.withdrawTime * 1000),
+    [investments]
+  );
+  
+  const totalProfit = useMemo(() => 
+    investments.reduce((sum, inv) => {
+      if (inv.withdrawn) {
+        return sum + (parseFloat(inv.estimatedReturn) - parseFloat(inv.amount));
+      }
+      return sum;
+    }, 0),
+    [investments]
+  );
 
   // ProtectedRoute already handles authentication check, but keep this as a fallback
   if (!isConnected) {
@@ -126,21 +142,6 @@ function DashboardSection() {
       </section>
     );
   }
-
-  const activeInvestments = useMemo(() => 
-    investments.filter(inv => !inv.withdrawn && Date.now() < inv.withdrawTime * 1000),
-    [investments]
-  );
-  
-  const totalProfit = useMemo(() => 
-    investments.reduce((sum, inv) => {
-      if (inv.withdrawn) {
-        return sum + (parseFloat(inv.estimatedReturn) - parseFloat(inv.amount));
-      }
-      return sum;
-    }, 0),
-    [investments]
-  );
 
   return (
     <section className="relative py-12">

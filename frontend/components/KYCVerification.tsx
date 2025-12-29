@@ -71,15 +71,50 @@ export default function KYCVerification({ onComplete, onError }: KYCVerification
       }
 
       if (!response.ok) {
-        const data = await response.json().catch(() => ({ error: 'Unknown error occurred' }));
+        const data = await response.json().catch(() => ({ error: 'Unknown error occurred', code: 'UNKNOWN_ERROR' }));
+        
+        // Handle specific error codes
+        if (data.code === 'STRIPE_IDENTITY_NOT_ENABLED') {
+          throw new Error('Stripe Identity is not enabled. Please contact support to enable KYC verification.');
+        }
+        
+        if (data.code === 'STRIPE_NOT_CONFIGURED') {
+          throw new Error('KYC verification is not configured. Please contact support.');
+        }
+        
+        if (data.code === 'STRIPE_AUTH_ERROR') {
+          throw new Error('Stripe authentication failed. Please contact support.');
+        }
+        
         throw new Error(data.error || `Failed to create verification session (${response.status})`);
       }
 
       const data = await response.json();
       
+      logger.info('KYC verification session response', { 
+        hasSessionId: !!data.verificationSessionId,
+        hasClientSecret: !!data.clientSecret,
+        clientSecretPrefix: data.clientSecret?.substring(0, 10),
+      });
+      
       if (!data.verificationSessionId || !data.clientSecret) {
-        throw new Error('Invalid response from server: missing session ID or client secret.');
+        logger.error('Missing verification session data', undefined, { data });
+        throw new Error('Invalid response from server: missing session ID or client secret. Please try again.');
       }
+      
+      // Validate clientSecret format (should start with vs_)
+      if (!data.clientSecret.startsWith('vs_')) {
+        logger.error('Invalid clientSecret format', undefined, { 
+          clientSecret: data.clientSecret.substring(0, 20),
+          fullLength: data.clientSecret.length,
+        });
+        throw new Error('Invalid verification session format. Please try again.');
+      }
+
+      logger.info('Setting verification session', { 
+        sessionId: data.verificationSessionId,
+        clientSecretPrefix: data.clientSecret.substring(0, 10),
+      });
 
       setVerificationSessionId(data.verificationSessionId);
       setClientSecret(data.clientSecret);
@@ -281,14 +316,50 @@ export default function KYCVerification({ onComplete, onError }: KYCVerification
         </div>
       </div>
 
-      <div className="bg-primary-gray rounded-xl border border-primary-gray-light p-6">
-        <iframe
-          src={`https://verify.stripe.com/start/${clientSecret}`}
-          className="w-full h-[600px] border-0 rounded-lg"
-          title="Identity Verification"
-          allow="camera"
-        />
-      </div>
+      {clientSecret && clientSecret.startsWith('vs_') ? (
+        <div className="bg-primary-gray rounded-xl border border-primary-gray-light p-6">
+          <iframe
+            key={clientSecret} // Force re-render if clientSecret changes
+            src={`https://verify.stripe.com/start/${clientSecret}`}
+            className="w-full h-[600px] border-0 rounded-lg"
+            title="Identity Verification"
+            allow="camera"
+            onError={() => {
+              logger.error('Failed to load Stripe Identity iframe', undefined, { clientSecret: clientSecret.substring(0, 20) });
+              setError('Failed to load verification form. Please check if Stripe Identity is enabled and try again.');
+              setStatus('failed');
+            }}
+            onLoad={() => {
+              logger.info('Stripe Identity iframe loaded successfully', { clientSecret: clientSecret.substring(0, 20) });
+            }}
+          />
+        </div>
+      ) : (
+        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-6">
+          <div className="flex items-start gap-3">
+            <svg className="w-5 h-5 text-red-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <div className="flex-1">
+              <h3 className="font-semibold text-red-400 mb-1">Invalid Verification Session</h3>
+              <p className="text-red-300 text-sm">
+                The verification session could not be initialized. Please try again or contact support if the problem persists.
+              </p>
+              <button
+                onClick={() => {
+                  setClientSecret(null);
+                  setVerificationSessionId(null);
+                  setStatus('idle');
+                  createVerificationSession();
+                }}
+                className="mt-4 px-4 py-2 bg-accent-yellow text-black rounded-lg hover:bg-accent-yellow-light font-medium transition-colors"
+              >
+                Retry Verification
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="text-center text-sm text-primary-gray-lighter">
         <p>Verification is handled securely by Stripe Identity</p>

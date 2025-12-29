@@ -14,8 +14,17 @@ STRIPE_WEBHOOK_SECRET=whsec_your_webhook_secret_here
 
 1. **Enable Stripe Identity** in your Stripe Dashboard:
    - Go to https://dashboard.stripe.com/settings/identity
-   - Enable "Identity" if not already enabled
-   - Configure verification settings
+   - Click "Enable Identity" if not already enabled
+   - Wait for activation (may take a few minutes)
+   - Configure verification settings:
+     - Allowed document types: Passport, Driver's License, ID Card
+     - Require selfie matching: Yes (recommended)
+   - **Important**: Make sure you're using the correct API keys (test mode for development, live mode for production)
+
+2. **Verify API Keys**:
+   - Test mode keys start with `sk_test_` and `pk_test_`
+   - Live mode keys start with `sk_live_` and `pk_live_`
+   - Make sure your `.env.local` has the correct keys for your environment
 
 2. **Set up Webhook** (for production):
    - Go to https://dashboard.stripe.com/webhooks
