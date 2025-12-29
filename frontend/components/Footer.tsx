@@ -1,9 +1,57 @@
+'use client';
+
 import Link from 'next/link';
+import { useStats } from '@/hooks/useStats';
 
 export default function Footer() {
+  const { data: stats, isLoading } = useStats();
+
+  const formatNumber = (num: number) => {
+    if (num >= 1000000) {
+      return (num / 1000000).toFixed(1) + 'M';
+    }
+    if (num >= 1000) {
+      return (num / 1000).toFixed(1) + 'K';
+    }
+    return num.toLocaleString('en-US');
+  };
+
   return (
     <footer className="bg-black text-white border-t border-primary-gray">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+        {/* Stats Section */}
+        <div className="mb-8 pb-8 border-b border-primary-gray-light">
+          <div className="flex flex-wrap items-center justify-center gap-6 text-sm text-primary-gray-lighter">
+            {isLoading ? (
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 bg-accent-yellow rounded-full animate-pulse"></div>
+                <span>Loading stats...</span>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                  <span>
+                    <span className="text-white font-semibold">{formatNumber(stats?.onlineNow || 0)}</span> online now
+                  </span>
+                </div>
+                <div className="hidden sm:block text-primary-gray">•</div>
+                <div className="flex items-center gap-2">
+                  <span>
+                    <span className="text-white font-semibold">{formatNumber(stats?.activeToday || 0)}</span> active today
+                  </span>
+                </div>
+                <div className="hidden sm:block text-primary-gray">•</div>
+                <div className="flex items-center gap-2">
+                  <span>
+                    <span className="text-white font-semibold">{formatNumber(stats?.totalRegistrations || 0)}</span> total users
+                  </span>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
           <div>
             <h3 className="text-xl font-bold mb-1 text-accent-yellow">El Toro Negro</h3>
@@ -25,22 +73,23 @@ export default function Footer() {
           <div>
             <h4 className="font-semibold mb-4 text-accent-yellow">Resources</h4>
             <ul className="space-y-2 text-sm text-primary-gray-lighter">
-              <li><a href="#" className="hover:text-accent-yellow transition-colors">Documentation</a></li>
-              <li><a href="#" className="hover:text-accent-yellow transition-colors">How It Works</a></li>
-              <li><a href="#" className="hover:text-accent-yellow transition-colors">FAQ</a></li>
+              <li><Link href="/how-it-works" className="hover:text-accent-yellow transition-colors">How It Works</Link></li>
+              <li><Link href="/faq" className="hover:text-accent-yellow transition-colors">FAQ</Link></li>
+              <li><Link href="/work" className="hover:text-accent-yellow transition-colors">Work with Us</Link></li>
             </ul>
           </div>
           <div>
             <h4 className="font-semibold mb-4 text-accent-yellow">Legal</h4>
             <ul className="space-y-2 text-sm text-primary-gray-lighter">
-              <li><a href="#" className="hover:text-accent-yellow transition-colors">Terms of Service</a></li>
-              <li><a href="#" className="hover:text-accent-yellow transition-colors">Privacy Policy</a></li>
-              <li><a href="#" className="hover:text-accent-yellow transition-colors">Disclaimer</a></li>
+              <li><Link href="/terms" className="hover:text-accent-yellow transition-colors">Terms of Service</Link></li>
+              <li><Link href="/privacy" className="hover:text-accent-yellow transition-colors">Privacy Policy</Link></li>
+              <li><Link href="/cookie-policy" className="hover:text-accent-yellow transition-colors">Cookie Policy</Link></li>
+              <li><Link href="/disclaimer" className="hover:text-accent-yellow transition-colors">Disclaimer</Link></li>
             </ul>
           </div>
         </div>
         <div className="border-t border-primary-gray mt-8 pt-8 text-center text-sm text-primary-gray-lighter">
-          <p>&copy; {new Date().getFullYear()} El Toro Negro. All rights reserved.</p>
+          <p>&copy; 2025 El Toro Negro. All rights reserved.</p>
         </div>
       </div>
     </footer>

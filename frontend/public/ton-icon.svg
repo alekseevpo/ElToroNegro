@@ -1,0 +1,9 @@
+<svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="40" height="40" rx="8" fill="#0088CC"/>
+  <!-- TON Logo - clean diamond design -->
+  <path d="M20 11L27.5 17L20 23L12.5 17L20 11Z" fill="white"/>
+  <path d="M27.5 17L31 19L27.5 21L20 17L27.5 17Z" fill="white" opacity="0.9"/>
+  <path d="M12.5 17L9 19L12.5 21L20 17L12.5 17Z" fill="white" opacity="0.9"/>
+  <path d="M20 23L27.5 21L20 29L12.5 21L20 23Z" fill="white" opacity="0.7"/>
+</svg>
+

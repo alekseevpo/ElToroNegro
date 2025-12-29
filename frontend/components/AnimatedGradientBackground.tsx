@@ -130,11 +130,11 @@ export default function AnimatedGradientBackground() {
         ctx.fill();
       }
 
-      // Simplified grid pattern for better performance (only every 2nd frame)
-      if (Math.floor(time * 100) % 2 === 0) {
+      // Simplified grid pattern for better performance (only every 4th frame - дополнительная оптимизация)
+      if (Math.floor(time * 100) % 4 === 0) {
         ctx.strokeStyle = `rgba(255, 215, 0, ${0.05 + Math.sin(time * 0.1) * 0.03})`;
         ctx.lineWidth = 1;
-        const gridSize = 150; // Increased spacing for fewer lines
+        const gridSize = 200; // Увеличено расстояние для еще меньшего количества линий
         const offset = Math.sin(time * 0.05) * 20;
         
         for (let x = 0; x < canvas.width; x += gridSize * 2) {

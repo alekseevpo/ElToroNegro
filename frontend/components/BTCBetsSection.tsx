@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { logger } from '@/lib/logger';
 
 export default function BTCBetsSection() {
   const [predictedPrice, setPredictedPrice] = useState('');
@@ -18,7 +19,7 @@ export default function BTCBetsSection() {
       return;
     }
     // TODO: Implement BTC bet placement
-    console.log('Placing bet:', price);
+    logger.info('Placing BTC bet', { predictedPrice: price });
     alert(`Placing bet on BTC price: $${price.toLocaleString()}`);
   };
 

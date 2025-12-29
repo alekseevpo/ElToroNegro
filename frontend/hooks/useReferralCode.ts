@@ -1,13 +1,15 @@
 /**
- * Hook to handle referral codes from URL and local storage
+ * Hook to handle referral codes from URL
+ * Now uses API instead of localStorage
  */
 
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { getUserProfile, initializeProfile } from '@/lib/profile-utils';
+import { useProfile } from './useProfile';
 
 export const useReferralCode = (account: string | null) => {
   const searchParams = useSearchParams();
+  const { profile } = useProfile(account);
   const [referralCode, setReferralCode] = useState<string | null>(null);
 
   useEffect(() => {
@@ -15,38 +17,22 @@ export const useReferralCode = (account: string | null) => {
     const refFromUrl = searchParams?.get('ref');
     
     if (refFromUrl && account) {
-      // Check if user already has a profile
-      const profile = getUserProfile(account);
+      // If profile exists and already has referral code, don't set
+      if (profile?.referredBy) {
+        setReferralCode(null);
+        return;
+      }
       
-      // If no profile exists, initialize with referral code
-      if (!profile) {
-        setReferralCode(refFromUrl);
-        // Store in localStorage for later use when profile is created
-        localStorage.setItem(`pending_ref_${account.toLowerCase()}`, refFromUrl);
-      } else if (!profile.referredBy) {
-        // Profile exists but no referral code set yet
-        setReferralCode(refFromUrl);
-        localStorage.setItem(`pending_ref_${account.toLowerCase()}`, refFromUrl);
-      }
-    } else if (account) {
-      // Check for pending referral code in localStorage
-      const pendingRef = localStorage.getItem(`pending_ref_${account.toLowerCase()}`);
-      if (pendingRef) {
-        const profile = getUserProfile(account);
-        if (profile && !profile.referredBy) {
-          setReferralCode(pendingRef);
-        } else if (!profile) {
-          setReferralCode(pendingRef);
-        }
-      }
-    }
-  }, [account, searchParams]);
-
-  const clearPendingReferral = () => {
-    if (account) {
-      localStorage.removeItem(`pending_ref_${account.toLowerCase()}`);
+      // Set referral code from URL (will be applied when profile is created/updated)
+      setReferralCode(refFromUrl);
+    } else {
+      // No referral code in URL
       setReferralCode(null);
     }
+  }, [account, searchParams, profile]);
+
+  const clearPendingReferral = () => {
+    setReferralCode(null);
   };
 
   return { referralCode, clearPendingReferral };

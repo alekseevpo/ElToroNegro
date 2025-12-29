@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { logger } from '@/lib/logger';
 
 export default function LotterySection() {
   const [ticketCount, setTicketCount] = useState(1);
@@ -8,7 +9,7 @@ export default function LotterySection() {
 
   const handleBuyTickets = () => {
     // TODO: Implement lottery ticket purchase
-    console.log('Buying tickets:', ticketCount);
+    logger.info('Buying lottery tickets', { ticketCount, totalPrice: ticketCount * ticketPrice });
     alert(`Purchasing ${ticketCount} ticket(s) for ${ticketCount * ticketPrice} ETH`);
   };
 

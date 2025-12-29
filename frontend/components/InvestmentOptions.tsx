@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { logger } from '@/lib/logger';
 
 interface Asset {
   id: string;
@@ -41,7 +42,7 @@ export default function InvestmentOptions() {
       return;
     }
     // TODO: Implement investment logic
-    console.log('Investing:', { asset: selectedAsset.name, amount });
+    logger.info('Investment initiated', { asset: selectedAsset.name, amount, symbol: selectedAsset.symbol });
     alert(`Investment of €${amount} in ${selectedAsset.name} initiated!`);
   };
 

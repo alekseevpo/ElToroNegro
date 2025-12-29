@@ -1,13 +1,34 @@
 import { NextRequest, NextResponse } from 'next/server';
-import Stripe from 'stripe';
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
-  apiVersion: '2025-12-15.clover',
-});
 
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET || '';
 
 export async function POST(request: NextRequest) {
+  // Check if Stripe is configured
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+  
+  if (!stripeSecretKey || !webhookSecret) {
+    console.warn('Stripe webhook secret is not configured');
+    return NextResponse.json(
+      { error: 'Webhook is not configured' },
+      { status: 503 }
+    );
+  }
+
+  // Dynamically import Stripe
+  let Stripe;
+  try {
+    Stripe = (await import('stripe')).default;
+  } catch (importError) {
+    return NextResponse.json(
+      { error: 'Stripe SDK is not installed' },
+      { status: 500 }
+    );
+  }
+
+  const stripe = new Stripe(stripeSecretKey, {
+    apiVersion: '2024-12-18.acacia',
+  });
+
   const body = await request.text();
   const signature = request.headers.get('stripe-signature');
 
@@ -24,34 +45,109 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
   }
 
+  // Import database functions
+  const { updateKYCStatusInDB } = await import('@/lib/db-profile-utils');
+
   // Handle verification session events
   if (event.type === 'identity.verification_session.verified') {
     const session = event.data.object as Stripe.Identity.VerificationSession;
     const userId = session.metadata?.userId;
 
     if (userId) {
-      // Note: In a real application, you would update the database here
-      // For now, we'll just log it. The frontend will handle the update via API call
-      console.log(`User ${userId} verified successfully - Session: ${session.id}`);
+      try {
+        await updateKYCStatusInDB(userId, {
+          verified: true,
+          verificationId: session.id,
+          provider: 'stripe',
+          status: 'verified',
+          verificationDate: Date.now(),
+        });
+        console.log(`User ${userId} verified successfully - Session: ${session.id}`);
+      } catch (error) {
+        console.error(`Error updating KYC status for user ${userId}:`, error);
+      }
     }
   }
 
   if (event.type === 'identity.verification_session.requires_input') {
     const session = event.data.object as Stripe.Identity.VerificationSession;
     const userId = session.metadata?.userId;
-    console.log(`Verification requires additional input for user ${userId} - Session: ${session.id}`);
+    
+    if (userId) {
+      try {
+        await updateKYCStatusInDB(userId, {
+          verified: false,
+          verificationId: session.id,
+          provider: 'stripe',
+          status: 'requires_input',
+          verificationDate: Date.now(),
+        });
+        console.log(`Verification requires additional input for user ${userId} - Session: ${session.id}`);
+      } catch (error) {
+        console.error(`Error updating KYC status for user ${userId}:`, error);
+      }
+    }
   }
 
   if (event.type === 'identity.verification_session.canceled') {
     const session = event.data.object as Stripe.Identity.VerificationSession;
     const userId = session.metadata?.userId;
-    console.log(`Verification canceled for user ${userId} - Session: ${session.id}`);
+    
+    if (userId) {
+      try {
+        await updateKYCStatusInDB(userId, {
+          verified: false,
+          verificationId: session.id,
+          provider: 'stripe',
+          status: 'canceled',
+          verificationDate: Date.now(),
+        });
+        console.log(`Verification canceled for user ${userId} - Session: ${session.id}`);
+      } catch (error) {
+        console.error(`Error updating KYC status for user ${userId}:`, error);
+      }
+    }
   }
 
   if (event.type === 'identity.verification_session.processing') {
     const session = event.data.object as Stripe.Identity.VerificationSession;
     const userId = session.metadata?.userId;
-    console.log(`Verification processing for user ${userId} - Session: ${session.id}`);
+    
+    if (userId) {
+      try {
+        await updateKYCStatusInDB(userId, {
+          verified: false,
+          verificationId: session.id,
+          provider: 'stripe',
+          status: 'processing',
+          verificationDate: Date.now(),
+        });
+        console.log(`Verification processing for user ${userId} - Session: ${session.id}`);
+      } catch (error) {
+        console.error(`Error updating KYC status for user ${userId}:`, error);
+      }
+    }
+  }
+
+  if (event.type === 'identity.verification_session.verification_failed') {
+    const session = event.data.object as Stripe.Identity.VerificationSession;
+    const userId = session.metadata?.userId;
+    
+    if (userId) {
+      try {
+        await updateKYCStatusInDB(userId, {
+          verified: false,
+          verificationId: session.id,
+          provider: 'stripe',
+          status: 'failed',
+          verificationDate: Date.now(),
+          error: 'Verification failed',
+        });
+        console.log(`Verification failed for user ${userId} - Session: ${session.id}`);
+      } catch (error) {
+        console.error(`Error updating KYC status for user ${userId}:`, error);
+      }
+    }
   }
 
   return NextResponse.json({ received: true });

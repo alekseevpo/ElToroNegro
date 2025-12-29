@@ -2,9 +2,12 @@
 
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTonConnectUI, useTonAddress } from '@tonconnect/ui-react';
 import TonConnectButtonWrapper from './TonConnectButton';
+import { logger } from '@/lib/logger';
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -12,23 +15,32 @@ interface LoginModalProps {
 }
 
 export default function LoginModal({ isOpen, onClose }: LoginModalProps) {
-  const { connect, loading } = useAuth();
+  const { connect, onTonConnect } = useAuth();
+  const router = useRouter();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [step, setStep] = useState<'email' | 'password'>('email');
+  const [savedEmail, setSavedEmail] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
   const [mounted, setMounted] = useState(false);
-  const [showInstructions, setShowInstructions] = useState(false);
+
+  const [tonConnectUI] = useTonConnectUI();
+  const tonUserAddress = useTonAddress();
 
   useEffect(() => {
     setMounted(true);
     return () => setMounted(false);
   }, []);
 
-  // Блокировать скролл фона когда модальное окно открыто и сбросить состояние
   useEffect(() => {
     if (isOpen) {
       document.body.style.overflow = 'hidden';
-      // Сбросить состояние при открытии модального окна
       setError(null);
-      setShowInstructions(false);
+      setEmail('');
+      setPassword('');
+      setStep('email');
+      setSavedEmail('');
     } else {
       document.body.style.overflow = 'unset';
     }
@@ -37,245 +49,351 @@ export default function LoginModal({ isOpen, onClose }: LoginModalProps) {
     };
   }, [isOpen]);
 
-  const handleConnect = async (walletType: 'metamask' | 'walletconnect' = 'metamask') => {
-    setError(null);
-    setShowInstructions(true);
-    
-    try {
-      await connect(walletType);
-      setShowInstructions(false);
-      // Небольшая задержка перед закрытием, чтобы состояние обновилось
+  // Listen for TON connection
+  useEffect(() => {
+    if (tonUserAddress && isOpen) {
+      setIsLoading(false);
+      setError(null);
+      
+      // Call the auth context handler to set user
+      if (onTonConnect) {
+        onTonConnect(tonUserAddress);
+      }
+      
+      // Close modal after successful connection
       setTimeout(() => {
         onClose();
-      }, 300);
+      }, 500);
+    }
+  }, [tonUserAddress, isOpen, onTonConnect, onClose]);
+
+  const handleGoogleSignIn = async () => {
+    setError(null);
+    setIsLoading(true);
+
+    try {
+      // Redirect to our API route which will redirect to Google OAuth
+      window.location.href = '/api/auth/google';
+      // Note: setIsLoading won't be called here as page will redirect
     } catch (err: any) {
-      setShowInstructions(false);
-      setError(err.message || 'Failed to connect wallet');
+      setError(err.message || 'Failed to initiate Google Sign-In');
+      setIsLoading(false);
     }
   };
 
-  if (!mounted) return null;
+  const handleEmailContinue = async () => {
+    if (!email || !email.includes('@')) {
+      setError('Please enter a valid email address');
+      return;
+    }
 
-  const backdropVariants = {
-    hidden: { opacity: 0 },
-    visible: { opacity: 1 },
-    exit: { opacity: 0 }
+    setError(null);
+    setIsLoading(true);
+    
+    // Simulate email validation (TODO: Replace with actual API call)
+    setTimeout(() => {
+      setSavedEmail(email);
+      setStep('password');
+      setIsLoading(false);
+    }, 500);
   };
 
-  const modalVariants = {
-    hidden: { 
-      opacity: 0, 
-      scale: 0.95,
-      y: 20
-    },
-    visible: { 
-      opacity: 1, 
-      scale: 1,
-      y: 0,
-      transition: {
-        type: 'spring',
-        damping: 25,
-        stiffness: 300
-      }
-    },
-    exit: { 
-      opacity: 0, 
-      scale: 0.95,
-      y: 20,
-      transition: {
-        duration: 0.2
-      }
+  const handlePasswordSubmit = async () => {
+    if (!password || password.length < 6) {
+      setError('Password must be at least 6 characters');
+      return;
+    }
+
+    setError(null);
+    setIsLoading(true);
+
+    // TODO: Replace with actual authentication API call
+    // For now, simulate authentication
+    try {
+      // Simulate API call
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // TODO: Call actual authentication endpoint
+      // const response = await fetch('/api/auth/login', {
+      //   method: 'POST',
+      //   headers: { 'Content-Type': 'application/json' },
+      //   body: JSON.stringify({ email: savedEmail, password }),
+      // });
+      // const data = await response.json();
+      // if (!response.ok) throw new Error(data.error);
+
+      // For demo purposes, accept any password (replace with actual validation)
+      // In production, validate password against backend
+      logger.debug('Authenticating user', { email: savedEmail });
+      
+      // After successful authentication, redirect to dashboard
+      onClose();
+      router.push('/dashboard');
+    } catch (err: any) {
+      setError(err.message || 'Invalid email or password');
+      setIsLoading(false);
     }
   };
+
+  const handleBackToEmail = () => {
+    setStep('email');
+    setPassword('');
+    setError(null);
+  };
+
+  const handleWalletConnect = async (walletType: 'metamask' | 'ton' = 'metamask') => {
+    setError(null);
+    setIsLoading(true);
+
+    try {
+      if (walletType === 'metamask') {
+        // Check if MetaMask is installed
+        if (typeof window === 'undefined' || !(window as any).ethereum) {
+          setError('MetaMask is not installed. Please install MetaMask extension to continue.');
+          setIsLoading(false);
+          return;
+        }
+
+        // Connect MetaMask wallet
+        await connect('metamask');
+        
+        // Close modal after successful connection
+        setTimeout(() => {
+          onClose();
+        }, 300);
+      } else if (walletType === 'ton') {
+        // Open TON Connect modal
+        try {
+          await tonConnectUI.openModal();
+          // Don't set loading to false here - wait for connection callback
+          // The useEffect hook will handle closing the modal when tonUserAddress is set
+        } catch (err: any) {
+          setError(err.message || 'Failed to open TON Connect modal. Please make sure you have a TON wallet installed.');
+          setIsLoading(false);
+        }
+      }
+    } catch (err: any) {
+      // Handle specific error cases
+      let errorMessage = 'Failed to connect wallet';
+      
+      if (err.message) {
+        errorMessage = err.message;
+      } else if (err.code === 4001) {
+        errorMessage = 'Connection request was rejected. Please try again.';
+      } else if (err.code === -32002) {
+        errorMessage = 'Connection request is pending. Please check your wallet and approve the connection.';
+      }
+      
+      setError(errorMessage);
+      setIsLoading(false);
+    }
+  };
+
+  if (!mounted || !isOpen) return null;
 
   const modalContent = (
-    <AnimatePresence>
-      {isOpen && (
-        <motion.div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          variants={backdropVariants}
-          initial="hidden"
-          animate="visible"
-          exit="exit"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) {
-              onClose();
-            }
-          }}
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+      {/* Backdrop */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+        onClick={onClose}
+      />
+
+      {/* Modal */}
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.95, y: 20 }}
+        transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+        className="relative bg-primary-gray rounded-2xl p-8 w-full max-w-md mx-4 border border-primary-gray-light shadow-2xl z-10"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Close button */}
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 text-primary-gray-lighter hover:text-white transition-colors"
         >
-          {/* Backdrop */}
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
-          
-          {/* Modal */}
-          <motion.div
-            className="relative bg-primary-gray rounded-3xl max-w-lg w-full shadow-2xl overflow-hidden"
-            variants={modalVariants}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div className="px-8 pt-8 pb-6 border-b border-primary-gray-light">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-3xl font-bold text-white tracking-tight">
-                    Connect Wallet
-                  </h2>
-                  <p className="text-primary-gray-lighter mt-2 text-sm">
-                    Choose your preferred wallet provider
-                  </p>
-                </div>
-                <button
-                  onClick={onClose}
-                  className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-primary-gray-light transition-colors text-primary-gray-lighter hover:text-white"
-                  aria-label="Close"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+
+        {/* Title */}
+        <h2 className="text-2xl font-bold text-white mb-6">
+          Welcome to El Toro Negro
+        </h2>
+
+        {/* Google Sign-In Button - Only show on email step */}
+        {step === 'email' && (
+          <>
+            <button
+              onClick={handleGoogleSignIn}
+              disabled={isLoading}
+              className="w-full flex items-center justify-center gap-3 bg-white hover:bg-gray-100 text-black font-medium py-3 px-4 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed mb-4"
+            >
+              <svg className="w-5 h-5" viewBox="0 0 24 24">
+                <path
+                  fill="#4285F4"
+                  d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                />
+                <path
+                  fill="#34A853"
+                  d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                />
+                <path
+                  fill="#FBBC05"
+                  d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+                />
+                <path
+                  fill="#EA4335"
+                  d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                />
+              </svg>
+              Continue with Google
+            </button>
+
+            {/* Divider */}
+            <div className="relative flex items-center my-6">
+              <div className="flex-grow border-t border-primary-gray-light"></div>
+              <span className="flex-shrink mx-4 text-sm text-primary-gray-lighter">OR</span>
+              <div className="flex-grow border-t border-primary-gray-light"></div>
             </div>
+          </>
+        )}
 
-            {/* Content */}
-            <div className="px-8 py-6">
-              {/* Инструкции при подключении */}
-              <AnimatePresence>
-                {showInstructions && loading && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-xl"
-                  >
-                    <div className="flex items-start space-x-3">
-                      <svg className="w-5 h-5 text-accent-yellow mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                      <div className="flex-1">
-                        <p className="font-medium text-white mb-2 text-sm">Check your wallet</p>
-                        <div className="text-xs text-accent-yellow space-y-1">
-                          <p>1. Open your wallet extension</p>
-                          <p>2. Approve the connection request</p>
-                          <p>3. Sign the authentication message</p>
-                        </div>
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {/* Error Message */}
-              <AnimatePresence>
-                {error && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="mb-6 p-4 bg-primary-gray border border-accent-yellow rounded-xl"
-                  >
-                    <div className="flex items-start space-x-3 mb-3">
-                      <svg className="w-5 h-5 text-accent-yellow mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                      </svg>
-                      <div className="flex-1">
-                        <p className="font-medium text-white mb-1 text-sm">
-                          {error.includes('pending') ? 'Connection Request Pending' : 'Connection Error'}
-                        </p>
-                        <p className="text-xs text-accent-yellow">{error}</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => {
-                        setError(null);
-                        handleConnect('metamask');
-                      }}
-                      disabled={loading}
-                      className="w-full px-4 py-2 bg-accent-yellow text-white text-sm font-medium rounded-lg hover:bg-accent-yellow-light transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {loading ? 'Connecting...' : 'Try Again'}
-                    </button>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {/* Wallet Options */}
-              <div className="space-y-3">
-                {/* MetaMask */}
-                <motion.button
-                  onClick={() => handleConnect('metamask')}
-                  disabled={loading}
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  className="w-full p-5 border-2 border-primary-gray-light rounded-2xl hover:border-accent-yellow transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-between group"
-                >
-                  <div className="flex items-center space-x-4">
-                    <div className="w-14 h-14 bg-black rounded-xl flex items-center justify-center group-hover:bg-primary-gray transition-colors border border-primary-gray-light">
-                      <svg className="w-8 h-8" viewBox="0 0 24 24" fill="none">
-                        <path d="M22 12L12 2L2 12L6 12L6 22L10 22L10 16L14 16L14 22L18 22L18 12Z" fill="#E2761B"/>
-                      </svg>
-                    </div>
-                    <div className="text-left">
-                      <div className="font-semibold text-white text-base">MetaMask</div>
-                      <div className="text-sm text-primary-gray-lighter">Connect using MetaMask</div>
-                    </div>
-                  </div>
-                  {loading ? (
-                    <svg className="animate-spin h-5 w-5 text-primary-gray-lighter" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                  ) : (
-                    <svg className="w-5 h-5 text-primary-gray-lighter group-hover:text-white transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                    </svg>
-                  )}
-                </motion.button>
-
-                {/* TON Wallet */}
-                <motion.div
-                  whileHover={{ scale: 1.02 }}
-                  className="w-full p-5 border-2 border-primary-gray-light rounded-2xl hover:border-accent-yellow transition-all group"
-                >
-                  <div className="flex items-center space-x-4 mb-4">
-                    <div className="w-14 h-14 bg-black rounded-xl flex items-center justify-center group-hover:bg-primary-gray transition-colors border border-primary-gray-light">
-                      <svg className="w-8 h-8" viewBox="0 0 24 24" fill="none">
-                        <circle cx="12" cy="12" r="10" fill="#0088CC"/>
-                        <text x="12" y="16" textAnchor="middle" fill="white" fontSize="12" fontWeight="bold">TON</text>
-                      </svg>
-                    </div>
-                    <div className="text-left flex-1">
-                      <div className="font-semibold text-white text-base">TON Wallet</div>
-                      <div className="text-sm text-primary-gray-lighter">Connect using TON wallet</div>
-                    </div>
-                  </div>
-                  <TonConnectButtonWrapper 
-                    onConnect={(address) => {
-                      setTimeout(() => {
-                        onClose();
-                      }, 500);
-                    }}
-                  />
-                </motion.div>
-              </div>
+        {/* Email Input Step */}
+        {step === 'email' && (
+          <div className="mb-4">
+            <label htmlFor="email" className="block text-sm font-medium text-primary-gray-lighter mb-2">
+              Email address
+            </label>
+            <div className="flex gap-2">
+              <input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handleEmailContinue()}
+                placeholder="Enter your email"
+                className="flex-1 px-4 py-2 bg-black border border-primary-gray-light rounded-lg text-white placeholder-gray-500 focus:ring-2 focus:ring-accent-yellow focus:border-accent-yellow outline-none"
+                autoComplete="email"
+              />
+              <button
+                onClick={handleEmailContinue}
+                disabled={isLoading || !email}
+                className="px-6 py-2 bg-accent-yellow hover:bg-accent-yellow-dark text-black font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Continue
+              </button>
             </div>
+          </div>
+        )}
 
-            {/* Footer */}
-            <div className="px-8 py-6 bg-black border-t border-primary-gray-light">
-              <p className="text-xs text-primary-gray-lighter text-center">
-                Don't have a wallet?{' '}
-                <a
-                  href="https://metamask.io/download/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-white font-medium hover:underline"
-                >
-                  Install MetaMask
-                </a>
+        {/* Password Input Step */}
+        {step === 'password' && (
+          <div className="mb-4">
+            <div className="flex items-center justify-between mb-2">
+              <label htmlFor="password" className="block text-sm font-medium text-primary-gray-lighter">
+                Password
+              </label>
+              <button
+                onClick={handleBackToEmail}
+                className="text-xs text-accent-yellow hover:text-accent-yellow-dark transition-colors"
+              >
+                ← Back
+              </button>
+            </div>
+            <div className="mb-2">
+              <p className="text-xs text-primary-gray-lighter">
+                Signing in as: <span className="text-white">{savedEmail}</span>
               </p>
             </div>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+            <div className="flex gap-2">
+              <input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handlePasswordSubmit()}
+                placeholder="Enter your password"
+                className="flex-1 px-4 py-2 bg-black border border-primary-gray-light rounded-lg text-white placeholder-gray-500 focus:ring-2 focus:ring-accent-yellow focus:border-accent-yellow outline-none"
+                autoComplete="current-password"
+              />
+              <button
+                onClick={handlePasswordSubmit}
+                disabled={isLoading || !password}
+                className="px-6 py-2 bg-accent-yellow hover:bg-accent-yellow-dark text-black font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isLoading ? 'Signing in...' : 'Sign In'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Wallet Options - Only show on email step */}
+        {step === 'email' && (
+          <div className="flex items-center justify-center gap-6 mb-6">
+          {/* MetaMask */}
+          <button
+            onClick={() => handleWalletConnect('metamask')}
+            disabled={isLoading}
+            className="flex items-center justify-center w-16 h-16 rounded-lg transition-all hover:scale-110 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+            title="Connect MetaMask"
+          >
+            <img 
+              src="/metamask-icon.svg"
+              alt="MetaMask"
+              className="w-full h-full object-contain"
+              onError={(e) => {
+                const target = e.target as HTMLImageElement;
+                target.style.display = 'none';
+              }}
+            />
+          </button>
+
+          {/* Telegram/TON Wallet */}
+          <button
+            onClick={() => handleWalletConnect('ton')}
+            disabled={isLoading}
+            className="flex items-center justify-center w-16 h-16 rounded-lg transition-all hover:scale-110 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+            title="Connect via Telegram"
+          >
+            <img 
+              src="/telegram-icon.png"
+              alt="Telegram"
+              className="w-full h-full object-contain"
+              onError={(e) => {
+                const target = e.target as HTMLImageElement;
+                target.style.display = 'none';
+              }}
+            />
+          </button>
+        </div>
+        )}
+
+        {/* Error Message */}
+        {error && (
+          <div className="mb-4 p-3 bg-red-900/20 border border-red-500/50 rounded-lg">
+            <p className="text-sm text-red-400">{error}</p>
+          </div>
+        )}
+
+        {/* Terms */}
+        <p className="text-xs text-primary-gray-lighter text-center">
+          By connecting, you agree to our{' '}
+          <a href="/terms" className="text-accent-yellow hover:underline">
+            Terms
+          </a>{' '}
+          and{' '}
+          <a href="/privacy" className="text-accent-yellow hover:underline">
+            Privacy
+          </a>
+        </p>
+      </motion.div>
+    </div>
   );
 
   return createPortal(modalContent, document.body);

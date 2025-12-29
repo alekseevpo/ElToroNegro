@@ -1,27 +1,18 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback, memo } from 'react';
 import { getUserTransactions, getTransactionsByType, type Transaction } from '@/lib/profile-utils';
 
 interface TransactionsTabProps {
   account: string;
 }
 
-export default function TransactionsTab({ account }: TransactionsTabProps) {
+function TransactionsTab({ account }: TransactionsTabProps) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [filter, setFilter] = useState<'all' | Transaction['type']>('all');
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    loadTransactions();
-    // Обновлять транзакции каждые 2 секунды для отображения новых
-    const interval = setInterval(() => {
-      loadTransactions();
-    }, 2000);
-    return () => clearInterval(interval);
-  }, [account, filter]);
-
-  const loadTransactions = () => {
+  const loadTransactions = useCallback(() => {
     if (!account) {
       setLoading(false);
       return;
@@ -34,9 +25,18 @@ export default function TransactionsTab({ account }: TransactionsTabProps) {
     
     setTransactions(filtered);
     setLoading(false);
-  };
+  }, [account, filter]);
 
-  const formatDate = (timestamp: number) => {
+  useEffect(() => {
+    loadTransactions();
+    // Обновлять транзакции каждые 30 секунд для отображения новых (оптимизировано с 2 сек)
+    const interval = setInterval(() => {
+      loadTransactions();
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [loadTransactions]);
+
+  const formatDate = useCallback((timestamp: number) => {
     return new Date(timestamp).toLocaleString('en-US', {
       year: 'numeric',
       month: 'short',
@@ -44,9 +44,9 @@ export default function TransactionsTab({ account }: TransactionsTabProps) {
       hour: '2-digit',
       minute: '2-digit',
     });
-  };
+  }, []);
 
-  const getStatusColor = (status: Transaction['status']) => {
+  const getStatusColor = useCallback((status: Transaction['status']) => {
     switch (status) {
       case 'completed':
         return 'bg-green-100 text-green-800';
@@ -57,9 +57,9 @@ export default function TransactionsTab({ account }: TransactionsTabProps) {
       default:
         return 'bg-gray-100 text-gray-800';
     }
-  };
+  }, []);
 
-  const getTypeLabel = (type: Transaction['type']) => {
+  const getTypeLabel = useCallback((type: Transaction['type']) => {
     const labels: Record<Transaction['type'], string> = {
       token_purchase: 'Token Purchase',
       investment: 'Investment',
@@ -68,9 +68,9 @@ export default function TransactionsTab({ account }: TransactionsTabProps) {
       btc_bet: 'BTC Bet',
     };
     return labels[type];
-  };
+  }, []);
 
-  const getTypeIcon = (type: Transaction['type']) => {
+  const getTypeIcon = useCallback((type: Transaction['type']) => {
     switch (type) {
       case 'token_purchase':
         return (
@@ -103,7 +103,12 @@ export default function TransactionsTab({ account }: TransactionsTabProps) {
           </svg>
         );
     }
-  };
+  }, []);
+
+  // Мемоизация отфильтрованных транзакций
+  const filteredTransactions = useMemo(() => {
+    return transactions;
+  }, [transactions]);
 
   if (loading) {
     return (
@@ -148,11 +153,11 @@ export default function TransactionsTab({ account }: TransactionsTabProps) {
       <div className="bg-primary-gray rounded-xl shadow-sm border border-primary-gray-light">
         <div className="p-6 border-b border-primary-gray-light">
           <h2 className="text-xl font-bold text-white">
-            Transaction History ({transactions.length})
+            Transaction History ({filteredTransactions.length})
           </h2>
         </div>
 
-        {transactions.length === 0 ? (
+        {filteredTransactions.length === 0 ? (
           <div className="p-12 text-center">
             <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -164,7 +169,7 @@ export default function TransactionsTab({ account }: TransactionsTabProps) {
           </div>
         ) : (
           <div className="divide-y divide-gray-200">
-            {transactions.map((transaction) => (
+            {filteredTransactions.map((transaction: Transaction) => (
               <div
                 key={transaction.id}
                 className="p-6 hover:bg-black transition-colors"
@@ -237,4 +242,6 @@ export default function TransactionsTab({ account }: TransactionsTabProps) {
     </div>
   );
 }
+
+export default memo(TransactionsTab);
 

@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { TonConnectButton, useTonAddress } from '@tonconnect/ui-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { logger } from '@/lib/logger';
 
 interface TonConnectButtonWrapperProps {
   onConnect?: (address: string) => void;
@@ -14,7 +15,7 @@ export default function TonConnectButtonWrapper({ onConnect }: TonConnectButtonW
 
   useEffect(() => {
     if (userFriendlyAddress) {
-      console.log('TON Wallet connected:', userFriendlyAddress);
+      logger.info('TON Wallet connected', { address: userFriendlyAddress });
       // Call the auth context handler
       if (onTonConnect) {
         onTonConnect(userFriendlyAddress);

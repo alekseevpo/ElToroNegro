@@ -19,7 +19,7 @@ const CRYPTO_MAPPING: Record<string, string> = {
 
 // Cache for prices to avoid too many API calls
 const priceCache: Map<string, { data: AssetPriceData; timestamp: number }> = new Map();
-const CACHE_DURATION = 600000; // 10 minutes cache to reduce API calls
+const CACHE_DURATION = 900000; // 15 minutes cache to reduce API calls (оптимизировано с 10 минут)
 
 /**
  * Fetch cryptocurrency price from CoinGecko
@@ -199,17 +199,40 @@ export const usdToEur = (usd: number): number => {
 /**
  * Generate mock price data for non-crypto assets (stocks, commodities)
  * In production, these should come from a real API like Alpha Vantage, Yahoo Finance, etc.
+ * 
+ * Uses deterministic seed based on asset ID to ensure consistent values between server and client
+ * IMPORTANT: This function must be fully deterministic to avoid hydration errors
  */
-export const getMockPriceData = (basePrice: number, volatility: number = 0.02): AssetPriceData => {
+export const getMockPriceData = (basePrice: number, volatility: number = 0.02, seed?: string): AssetPriceData => {
+  // Use deterministic "random" based on seed to ensure SSR/CSR consistency
+  // If no seed provided, use basePrice as seed for consistency
+  const seedValue = seed || basePrice.toString();
+  
+  // Simple hash function for deterministic pseudo-random
+  let hash = 0;
+  for (let i = 0; i < seedValue.length; i++) {
+    const char = seedValue.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  
+  // Use ONLY deterministic variation based on seed (no time-based values)
+  // This ensures server and client render the same values
+  const deterministic = Math.abs(hash) % 10000;
+  
+  // Normalize to -1 to 1 range (fully deterministic)
+  const normalized = (deterministic / 10000) * 2 - 1;
+  
   // Generate realistic price variation (±2% by default)
-  const variation = (Math.random() - 0.5) * volatility * 2;
+  const variation = normalized * volatility;
   const change24h = variation * 100;
   const price = basePrice * (1 + variation);
 
   return {
     price: Math.round(price * 100) / 100,
     change24h: Math.round(change24h * 100) / 100,
-    lastUpdated: Date.now(),
+    // Use a fixed timestamp for SSR/CSR consistency (only lastUpdated differs, which is fine)
+    lastUpdated: 0,
   };
 };
 

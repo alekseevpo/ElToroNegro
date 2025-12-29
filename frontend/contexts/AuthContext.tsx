@@ -12,11 +12,16 @@ import {
   validateSession,
   AuthSession,
 } from '@/lib/auth-utils';
+import { logger } from '@/lib/logger';
+import { handleError } from '@/lib/error-handler';
 
 interface User {
   address: string;
   balance: string;
   isConnected: boolean;
+  authType?: 'wallet' | 'google' | 'ton';
+  name?: string;
+  picture?: string;
 }
 
 interface AuthContextType {
@@ -58,6 +63,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       (window as any).ethereum.on('chainChanged', handleChainChanged);
     }
 
+
     return () => {
       if (typeof window !== 'undefined' && (window as any).ethereum) {
         (window as any).ethereum.removeListener('accountsChanged', handleAccountsChanged);
@@ -68,7 +74,36 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const checkSavedConnection = async () => {
     try {
-      // Check for stored session (secure authentication with signature)
+      // Check for Google session first
+      if (typeof window !== 'undefined') {
+        const googleSessionStr = sessionStorage.getItem('google_session');
+        if (googleSessionStr) {
+          try {
+            const googleSession = JSON.parse(googleSessionStr);
+            if (googleSession.expiresAt > Date.now()) {
+              // Valid Google session
+              setUser({
+                address: googleSession.email,
+                balance: '0',
+                isConnected: true,
+                authType: 'google',
+                name: googleSession.name,
+                picture: googleSession.picture,
+              });
+              setLoading(false);
+              return;
+            } else {
+              // Expired session
+              sessionStorage.removeItem('google_session');
+            }
+          } catch (error) {
+            logger.error('Error parsing Google session', error);
+            sessionStorage.removeItem('google_session');
+          }
+        }
+      }
+
+      // Check for stored ETH session (secure authentication with signature)
       const storedSession = getStoredSession();
       if (storedSession) {
         // Validate session (check expiration and signature)
@@ -89,17 +124,50 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
               address: storedSession.address,
               balance: balanceInEth,
               isConnected: true,
+              authType: 'wallet',
             });
             setProvider(provider);
+            setLoading(false);
             return;
           }
         }
         // Session is invalid or address doesn't match, clear it
         clearSession();
       }
+
+      // Check for TON session
+      if (typeof window !== 'undefined') {
+        const tonSessionStr = sessionStorage.getItem('ton_session');
+        if (tonSessionStr) {
+          try {
+            const tonSession = JSON.parse(tonSessionStr);
+            if (tonSession.expiresAt > Date.now()) {
+              // Valid TON session
+              setUser({
+                address: tonSession.address,
+                balance: '0',
+                isConnected: true,
+                authType: 'ton',
+              });
+              setLoading(false);
+              return;
+            } else {
+              // Expired session
+              sessionStorage.removeItem('ton_session');
+            }
+          } catch (error) {
+            logger.error('Error parsing TON session', error);
+            sessionStorage.removeItem('ton_session');
+          }
+        }
+      }
     } catch (error) {
-      console.error('Error checking saved connection:', error);
+      logger.error('Error checking saved connection', error);
       clearSession();
+      if (typeof window !== 'undefined') {
+        sessionStorage.removeItem('ton_session');
+        sessionStorage.removeItem('google_session');
+      }
     } finally {
       setLoading(false);
     }
@@ -128,12 +196,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         address,
         balance: balanceInEth,
         isConnected: true,
+        authType: 'wallet',
       };
 
       setUser(userData);
       setProvider(provider);
     } catch (error) {
-      console.error('Error connecting wallet:', error);
+      const { message } = handleError(error);
+      logger.error('Error connecting wallet', error, { walletType });
+      throw new Error(message || 'Failed to connect wallet');
       throw error;
     }
   };
@@ -141,7 +212,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const connect = async (walletType: 'metamask' | 'walletconnect' | 'ton' = 'metamask', retryCount = 0): Promise<void> => {
     // Предотвратить множественные запросы
     if (isConnecting && retryCount === 0) {
-      console.warn('Connection already in progress');
+      logger.warn('Connection already in progress');
       return;
     }
 
@@ -183,7 +254,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
                 return;
               }
             } catch (err) {
-              console.log('Error checking existing accounts:', err);
+              logger.debug('Error checking existing accounts', { error: err });
             }
           } else {
             // Session invalid, clear it
@@ -233,13 +304,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       } else {
         throw new Error('Unknown wallet type');
       }
-    } catch (error: any) {
-      console.error('Connection error:', error);
-      const errorMessage = error.code === 4001 
+    } catch (error: unknown) {
+      const { message, code } = handleError(error);
+      logger.error('Connection error', error, { walletType });
+      const errorMessage = code === 'USER_REJECTED'
         ? 'User rejected the connection request'
-        : error.code === -32002
+        : (error as { code?: number })?.code === -32002
         ? 'MetaMask connection is pending. Please check your MetaMask extension and approve the connection request, then try again.'
-        : error.message || 'Failed to connect wallet';
+        : message || 'Failed to connect wallet';
       throw new Error(errorMessage);
     } finally {
       setIsConnecting(false);
@@ -251,6 +323,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setUser(null);
     setProvider(null);
     clearSession();
+    // Also clear TON and Google sessions
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('ton_session');
+      sessionStorage.removeItem('google_session');
+      localStorage.removeItem('user_data');
+    }
   };
 
   const refreshBalance = async () => {
@@ -265,7 +343,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         balance: balanceInEth,
       });
     } catch (error) {
-      console.error('Error refreshing balance:', error);
+      logger.error('Error refreshing balance', error, { address: user?.address });
     }
   };
 
@@ -297,14 +375,32 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const isLoading = loading || isConnecting;
 
   // Handler for TON wallet connection
-  const handleTonConnect = (address: string) => {
-    // For TON wallet, we'll store the address differently
-    // Since TON uses different address format, we'll treat it as a connected user
-    setUser({
-      address,
-      balance: '0', // TON balance would need separate API call
-      isConnected: true,
-    });
+  const handleTonConnect = async (address: string) => {
+    try {
+      // For TON wallet, we'll store the address differently
+      // Since TON uses different address format, we'll treat it as a connected user
+      // TODO: Fetch actual TON balance from TON API if needed
+      setUser({
+        address,
+        balance: '0', // TON balance would need separate API call to TON blockchain
+        isConnected: true,
+        authType: 'ton',
+      });
+      
+      // Store TON connection in sessionStorage (simpler than ETH signature flow)
+      if (typeof window !== 'undefined') {
+        const tonSession = {
+          address: address.toLowerCase(),
+          walletType: 'ton',
+          connectedAt: Date.now(),
+          expiresAt: Date.now() + (7 * 24 * 60 * 60 * 1000), // 7 days
+        };
+        sessionStorage.setItem('ton_session', JSON.stringify(tonSession));
+      }
+    } catch (error) {
+      logger.error('Error handling TON connection', error, { address });
+      throw error;
+    }
   };
 
   return (

@@ -7,10 +7,18 @@ import { useAuth } from '@/contexts/AuthContext';
 import AnimatedCounter from './AnimatedCounter';
 import FundsChart from './FundsChart';
 import { generateRandomUsername } from '@/lib/ton-utils';
-import { addTransaction, getUserProfile, initializeProfile, addToPortfolio } from '@/lib/profile-utils';
+import { useProfile } from '@/hooks/useProfile';
+import { useProfileMutation } from '@/hooks/useProfileMutation';
+import { useTransactions } from '@/hooks/useTransactions';
 import { fetchCryptoPrice } from '@/lib/price-api';
+import KYCGate from './KYCGate';
+import CardPaymentForm from './CardPaymentForm';
 import { ethers } from 'ethers';
 import { getSigner } from '@/lib/contracts';
+import { useToast } from '@/hooks/useToast';
+import { logger } from '@/lib/logger';
+import { TREASURY_ADDRESS, TOKEN_ADDRESSES, ERC20_ABI, MIN_INVESTMENT_AMOUNT, ERROR_MESSAGES } from '@/lib/constants';
+import { handleError } from '@/lib/error-handler';
 
 interface ActivityMessage {
   id: string;
@@ -21,27 +29,16 @@ interface ActivityMessage {
 function BuyTokensSection() {
   const { user, refreshBalance } = useAuth();
   const { account, connect, isConnected } = useWallet();
+  const { showSuccess, showError } = useToast();
+  const { profile, refetch: refetchProfile } = useProfile(user?.address || null);
+  const { createProfile } = useProfileMutation();
+  const { addTransaction } = useTransactions(user?.address || null, { autoFetch: false });
   
-  // Адреса для приема платежей (можно настроить через переменные окружения)
-  const treasuryAddress = process.env.NEXT_PUBLIC_TREASURY_ADDRESS || '0x0000000000000000000000000000000000000000';
-  
-  // Адреса контрактов токенов (ERC-20)
-  const tokenAddresses = {
-    USDT: process.env.NEXT_PUBLIC_USDT_ADDRESS || '0xdAC17F958D2ee523a2206206994597C13D831ec7', // Mainnet USDT
-    WBTC: process.env.NEXT_PUBLIC_WBTC_ADDRESS || '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599', // Mainnet WBTC
-  };
-  
-  // ABI для ERC-20 токенов (только необходимые функции)
-  const ERC20_ABI = [
-    'function balanceOf(address owner) view returns (uint256)',
-    'function decimals() view returns (uint8)',
-    'function transfer(address to, uint256 amount) returns (bool)',
-    'function approve(address spender, uint256 amount) returns (bool)',
-    'function allowance(address owner, address spender) view returns (uint256)',
-  ];
+  // Use constants from centralized config
+  const treasuryAddress = TREASURY_ADDRESS;
   
   // Получить адрес сети для Etherscan (по умолчанию Sepolia для тестирования)
-  const getEtherscanUrl = (txHash: string) => {
+  const getEtherscanUrl = useCallback((txHash: string) => {
     const chainId = typeof window !== 'undefined' && (window as any).ethereum 
       ? (window as any).ethereum.chainId 
       : null;
@@ -53,7 +50,7 @@ function BuyTokensSection() {
     } else {
       return `https://etherscan.io/tx/${txHash}`;
     }
-  };
+  }, []);
   const searchParams = useSearchParams();
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'crypto'>('card');
   const [cryptoCurrency, setCryptoCurrency] = useState<'ETH' | 'USDT' | 'WBTC'>('ETH');
@@ -76,7 +73,7 @@ function BuyTokensSection() {
     } else if (canceled === 'true') {
       setMessage({ type: 'error', text: 'Payment was canceled' });
     }
-  }, [searchParams]);
+  }, [searchParams, verifyPayment]);
 
   // Обновить баланс при загрузке компонента и при изменении пользователя
   useEffect(() => {
@@ -85,7 +82,75 @@ function BuyTokensSection() {
     }
   }, [user?.address, refreshBalance]);
 
-  const verifyPayment = async (sessionId: string) => {
+  const handleCardPaymentSuccess = useCallback(async (paymentIntentId: string, amount: number) => {
+    try {
+      if (!user?.address) {
+        throw new Error('User not authenticated');
+      }
+
+      // Ensure profile exists
+      if (!profile && user.address) {
+        const defaultUsername = `user_${user.address.slice(2, 8)}`;
+        await createProfile({
+          address: user.address,
+          username: defaultUsername,
+        });
+        await refetchProfile();
+      }
+
+      // Add transaction to user profile
+      const tokensAmount = amount.toFixed(2); // 1 EUR = 1 $TAI
+      if (user.address) {
+        await addTransaction({
+          type: 'token_purchase',
+          status: 'completed',
+          amount: amount.toString(),
+          currency: 'EUR',
+          tokensAmount,
+          description: `Purchased ${tokensAmount} $TAI tokens via card payment`,
+          paymentMethod: 'card',
+          stripeSessionId: paymentIntentId,
+          metadata: {
+            paymentIntentId,
+          },
+        });
+      }
+
+      // TODO: Add tokens to portfolio via API endpoint
+      // Portfolio API endpoint needs to be created
+      // await addToPortfolio(user.address, {
+      //   id: `tai_${Date.now()}`,
+      //   symbol: 'TAI',
+      //   name: '$TAI Token',
+      //   amount: tokensAmount,
+      //   purchasePrice: '1.00',
+      //   currentPrice: '1.00',
+      //   currentValue: amount,
+      //   purchaseDate: Date.now(),
+      // });
+
+      setMessage({
+        type: 'success',
+        text: `Payment successful! You've purchased ${tokensAmount} $TAI tokens (€${amount.toFixed(2)}).`,
+      });
+      
+      showSuccess(`Successfully purchased ${tokensAmount} $TAI tokens!`);
+      
+      // Clear the amount field
+      setAmount('');
+      
+      // Update URL to remove query params
+      if (typeof window !== 'undefined') {
+        window.history.replaceState({}, '', '/buy-tokens');
+      }
+    } catch (error: unknown) {
+      const { message } = handleError(error);
+      logger.error('Error processing card payment', error, { paymentIntentId, amount });
+      showError(message || 'Failed to process payment. Please contact support.');
+    }
+  }, [user?.address, profile, createProfile, refetchProfile, addTransaction, showSuccess, showError]);
+
+  const verifyPayment = useCallback(async (sessionId: string) => {
     try {
       const response = await fetch('/api/stripe/verify-session', {
         method: 'POST',
@@ -99,50 +164,43 @@ function BuyTokensSection() {
 
       if (data.success && data.session?.payment_status === 'paid') {
         const amount = data.session.amount_total / 100; // Convert from cents to euros
-        setMessage({
-          type: 'success',
-          text: `Payment successful! You've purchased €${amount.toFixed(2)} worth of $TAI tokens.`,
-        });
-        // Clear the amount field
-        setAmount('');
-        // Update URL to remove query params
-        window.history.replaceState({}, '', '/buy-tokens');
+        handleCardPaymentSuccess(sessionId, amount);
       } else {
         setMessage({ type: 'error', text: 'Payment verification failed' });
       }
-    } catch (error: any) {
-      console.error('Error verifying payment:', error);
-      setMessage({ type: 'error', text: 'Failed to verify payment' });
+    } catch (error: unknown) {
+      const { message } = handleError(error);
+      logger.error('Error verifying payment', error, { sessionId });
+      setMessage({ type: 'error', text: message || 'Failed to verify payment' });
     }
-  };
+  }, [handleCardPaymentSuccess]);
 
-  const minAmount = 10; // Минимум 10 евро
   const tokenPrice = 1; // 1 $TAI = 1 EUR (примерно)
 
   // Генерация сообщений для бегущей строки
-  const generateInvestmentMessage = (amount: number): ActivityMessage => ({
+  const generateInvestmentMessage = useCallback((amount: number): ActivityMessage => ({
     id: Date.now().toString() + Math.random(),
     text: `New user invested €${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
     type: 'investment',
-  });
+  }), []);
 
-  const generateWithdrawalMessage = (amount: number): ActivityMessage => ({
+  const generateWithdrawalMessage = useCallback((amount: number): ActivityMessage => ({
     id: Date.now().toString() + Math.random(),
     text: `Pro user withdrew €${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
     type: 'withdrawal',
-  });
+  }), []);
 
-  const generateNewUserMessage = (): ActivityMessage => ({
+  const generateNewUserMessage = useCallback((): ActivityMessage => ({
     id: Date.now().toString() + Math.random(),
     text: 'New user joined the platform',
     type: 'user',
-  });
+  }), []);
 
-  const generateTonAuthMessage = (username: string): ActivityMessage => ({
+  const generateTonAuthMessage = useCallback((username: string): ActivityMessage => ({
     id: Date.now().toString() + Math.random(),
     text: `User "@${username}" authorized via TON wallet`,
     type: 'ton_auth',
-  });
+  }), []);
 
   // Реалтайм обновления счётчика
   useEffect(() => {
@@ -221,9 +279,9 @@ function BuyTokensSection() {
     setActivityMessages(initialMessages);
   }, []);
 
-  const handleBuy = async () => {
-    if (!amount || parseFloat(amount) < minAmount) {
-      setMessage({ type: 'error', text: `Minimum purchase is €${minAmount}` });
+  const handleBuy = useCallback(async () => {
+    if (!amount || parseFloat(amount) < MIN_INVESTMENT_AMOUNT) {
+      setMessage({ type: 'error', text: `Minimum purchase is €${MIN_INVESTMENT_AMOUNT}` });
       return;
     }
 
@@ -250,7 +308,10 @@ function BuyTokensSection() {
         
         // Проверка, что treasury address не равен адресу пользователя
         if (treasuryAddress.toLowerCase() === user.address.toLowerCase()) {
-          console.warn('Warning: Treasury address is the same as user address. Transaction will be sent to yourself.');
+          logger.warn('Treasury address is the same as user address', { 
+            treasuryAddress, 
+            userAddress: user.address 
+          });
           // Это нормально для тестирования, но предупреждаем пользователя
         }
         
@@ -319,14 +380,17 @@ function BuyTokensSection() {
           cryptoSymbol = 'ETH';
           
           // Проверить баланс пользователя
-          console.log('Checking balance for address:', user.address);
+          logger.debug('Checking balance', { address: user.address });
           const balance = await signer.provider.getBalance(user.address);
           const balanceInEth = parseFloat(ethers.formatEther(balance));
-          console.log('Balance from provider:', balanceInEth, 'ETH');
+          logger.debug('Balance retrieved', { balanceInEth, currency: 'ETH' });
           
           // Получить информацию о сети для отладки
           const networkInfo = await signer.provider.getNetwork();
-          console.log('Current network:', networkInfo.name, 'Chain ID:', networkInfo.chainId.toString());
+          logger.debug('Network info', { 
+            name: networkInfo.name, 
+            chainId: networkInfo.chainId.toString() 
+          });
           
           if (balanceInEth < cryptoAmount) {
             throw new Error(`Insufficient balance. You need ${cryptoAmount.toFixed(6)} ETH but have ${balanceInEth.toFixed(6)} ETH.`);
@@ -339,9 +403,12 @@ function BuyTokensSection() {
           });
           
           // Логирование для отладки
-          console.log('Sending transaction to treasury address:', treasuryAddress);
-          console.log('User address:', user.address);
-          console.log('Amount:', cryptoAmount.toFixed(18), 'ETH');
+          logger.info('Sending ETH transaction', {
+            treasuryAddress,
+            userAddress: user.address,
+            amount: cryptoAmount.toFixed(18),
+            currency: 'ETH',
+          });
           
           tx = await signer.sendTransaction({
             to: treasuryAddress,
@@ -349,7 +416,7 @@ function BuyTokensSection() {
           });
         } else {
           // Для USDT и WBTC - работа с ERC-20 токенами
-          const tokenAddress = tokenAddresses[cryptoCurrency];
+          const tokenAddress = TOKEN_ADDRESSES[cryptoCurrency];
           if (!tokenAddress || tokenAddress === '0x0000000000000000000000000000000000000000') {
             throw new Error(`${cryptoCurrency} token address not configured. Please contact support.`);
           }
@@ -434,54 +501,59 @@ function BuyTokensSection() {
           // Добавить транзакцию в историю
           if (user.address) {
             // Убедиться, что профиль существует перед добавлением транзакции
-            let profile = getUserProfile(user.address);
-            if (!profile) {
+            if (!profile && user.address) {
               // Создать профиль с дефолтным username, если его нет
               const defaultUsername = `user_${user.address.slice(2, 8)}`;
-              profile = initializeProfile(user.address, defaultUsername);
-              console.log('Profile created for transaction:', user.address);
+              await createProfile({
+                address: user.address,
+                username: defaultUsername,
+              });
+              await refetchProfile();
             }
             
             const tokensAmount = parseFloat(amount);
-            const transaction = await addTransaction(user.address, {
-              type: 'token_purchase',
-              status: 'completed',
-              amount: amountInEur.toFixed(2),
-              currency: 'EUR',
-              tokensAmount: tokensAmount.toFixed(2),
-              description: `Purchased ${tokensAmount.toFixed(2)} $TAI tokens with ${cryptoAmount.toFixed(6)} ${cryptoSymbol}`,
-              txHash: finalTxHash,
-              paymentMethod: 'crypto',
-              metadata: {
-                cryptoAmount: cryptoAmount.toFixed(6),
-                cryptoCurrency: cryptoSymbol,
-                priceInEur: priceInEur,
-                etherscanUrl: etherscanUrl,
-              },
-            });
-            
-            if (transaction) {
-              console.log('Transaction saved successfully:', transaction.id);
-              
-              // Добавить токены в портфель
-              // Цена 1 $TAI токена = 1 EUR (фиксированная цена)
-              const tokenPricePerUnit = 1; // 1 $TAI = 1 EUR
-              await addToPortfolio(user.address, {
-                type: 'token',
-                symbol: 'TAI',
-                name: 'Tokenized Asset Investment',
-                quantity: tokensAmount,
-                purchasePrice: tokenPricePerUnit,
-                currentPrice: tokenPricePerUnit, // Текущая цена равна цене покупки (1 EUR)
-                purchaseDate: Date.now(),
+            if (user.address) {
+              const transaction = await addTransaction({
+                type: 'token_purchase',
+                status: 'completed',
+                amount: amountInEur.toFixed(2),
                 currency: 'EUR',
-                totalCost: amountInEur, // Стоимость покупки в EUR
+                tokensAmount: tokensAmount.toFixed(2),
+                description: `Purchased ${tokensAmount.toFixed(2)} $TAI tokens with ${cryptoAmount.toFixed(6)} ${cryptoSymbol}`,
+                txHash: finalTxHash,
+                paymentMethod: 'crypto',
+                metadata: {
+                  cryptoAmount: cryptoAmount.toFixed(6),
+                  cryptoCurrency: cryptoSymbol,
+                  priceInEur: priceInEur,
+                  etherscanUrl: etherscanUrl,
+                },
               });
               
-              console.log(`Added ${tokensAmount} $TAI tokens to portfolio`);
-            } else {
-              console.error('Failed to save transaction');
-            }
+              if (transaction) {
+                logger.info('Transaction saved successfully', { 
+                  transactionId: transaction.id,
+                  tokensAmount,
+                });
+                
+                // TODO: Add tokens to portfolio via API endpoint
+                // Portfolio API endpoint needs to be created
+                // await addToPortfolio(user.address, {
+                //   type: 'token',
+                //   symbol: 'TAI',
+                //   name: 'Tokenized Asset Investment',
+                //   quantity: tokensAmount,
+                //   purchasePrice: tokenPricePerUnit,
+                //   currentPrice: tokenPricePerUnit,
+                //   purchaseDate: Date.now(),
+                //   currency: 'EUR',
+                //   totalCost: amountInEur, // Стоимость покупки в EUR
+                // });
+              
+                logger.debug('Tokens added to portfolio', { tokensAmount });
+              } else {
+                logger.error('Failed to save transaction', undefined, { userId: user.address });
+              }
           }
           
           setMessage({ 
@@ -494,12 +566,14 @@ function BuyTokensSection() {
           setAmount('');
           setLoading(false);
           
-          // Показать ссылку на Etherscan в консоли для отладки
-          console.log(`Transaction confirmed: ${etherscanUrl}`);
+          // Логирование подтверждения транзакции
+          logger.info('Transaction confirmed', { etherscanUrl, txHash: finalTxHash });
         } else {
           throw new Error('Transaction failed. Please try again.');
         }
-      } else {
+      }
+      
+      if (paymentMethod === 'card') {
         // Create Stripe Checkout Session
         const response = await fetch('/api/stripe/create-checkout', {
           method: 'POST',
@@ -521,12 +595,18 @@ function BuyTokensSection() {
         // Redirect to Stripe Checkout
         window.location.href = data.url;
       }
-    } catch (error: any) {
-      console.error('Error processing purchase:', error);
-      setMessage({ type: 'error', text: error.message || 'Failed to process purchase' });
+    }
+    } catch (error: unknown) {
+      const { message } = handleError(error);
+      logger.error('Error processing purchase', error, { 
+        paymentMethod, 
+        amount, 
+        cryptoCurrency 
+      });
+      setMessage({ type: 'error', text: message || 'Failed to process purchase' });
       setLoading(false);
     }
-  };
+  }, [amount, paymentMethod, cryptoCurrency, isConnected, user, account, connect, profile, createProfile, refetchProfile, addTransaction, showSuccess, showError, treasuryAddress, getEtherscanUrl]);
 
   const tokensAmount = amount ? parseFloat(amount).toFixed(2) : '0.00';
 
@@ -814,19 +894,19 @@ function BuyTokensSection() {
                 type="number"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                placeholder={`Minimum: €${minAmount}`}
-                min={minAmount}
+                placeholder={`Minimum: €${MIN_INVESTMENT_AMOUNT}`}
+                min={MIN_INVESTMENT_AMOUNT}
                 step="0.01"
                 className="w-full pl-10 pr-4 py-4 bg-black border-2 border-primary-gray-light rounded-xl focus:ring-2 focus:ring-accent-yellow focus:border-accent-yellow text-lg text-white"
               />
             </div>
             <p className="mt-2 text-sm text-primary-gray-lighter">
-              Minimum purchase: €{minAmount}
+              Minimum purchase: €{MIN_INVESTMENT_AMOUNT}
             </p>
           </div>
 
           {/* Token Calculation */}
-          {amount && parseFloat(amount) >= minAmount && (
+          {amount && parseFloat(amount) >= MIN_INVESTMENT_AMOUNT && (
             <div className="mb-8 p-6 bg-black border border-accent-yellow rounded-xl">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-primary-gray-lighter">You will receive:</span>
@@ -863,18 +943,100 @@ function BuyTokensSection() {
             </div>
           )}
 
-          {/* Buy Button */}
-          <button
-            onClick={handleBuy}
-            disabled={!amount || parseFloat(amount) < minAmount || loading}
-            className="w-full py-4 bg-accent-yellow text-black font-semibold text-lg rounded-xl hover:bg-accent-yellow-light transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {loading
-              ? 'Processing...'
-              : paymentMethod === 'crypto' && !isConnected
-                ? 'Connect Wallet to Continue'
-                : `Buy ${tokensAmount} $TAI Tokens`}
-          </button>
+          {/* KYC Warning for purchases > €1000 */}
+          {(() => {
+            const amountInEur = parseFloat(amount || '0');
+            const kycRequired = amountInEur > 1000;
+            const isVerified = profile?.kycStatus?.verified || false;
+
+            if (kycRequired && !isVerified && amountInEur >= minAmount) {
+              return (
+                <KYCGate 
+                  requiredAmount={1000}
+                  message={`To purchase tokens worth €${amountInEur.toFixed(2)}, identity verification is required. This helps us comply with financial regulations and protect all users.`}
+                >
+                  <button
+                    onClick={handleBuy}
+                    disabled={!amount || parseFloat(amount) < MIN_INVESTMENT_AMOUNT || loading}
+                    className="w-full py-4 bg-accent-yellow text-black font-semibold text-lg rounded-xl hover:bg-accent-yellow-light transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {loading
+                      ? 'Processing...'
+                      : paymentMethod === 'crypto' && !isConnected
+                        ? 'Connect Wallet to Continue'
+                        : `Buy ${tokensAmount} $TAI Tokens`}
+                  </button>
+                </KYCGate>
+              );
+            }
+
+            return (
+              <>
+                {/* KYC Success message */}
+                {kycRequired && isVerified && (
+                  <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+                    <div className="flex items-center gap-2 text-sm text-green-800">
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <span>Your identity is verified. You can proceed with this purchase.</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Warning for approaching KYC threshold */}
+                {!kycRequired && amountInEur > 500 && amountInEur >= minAmount && (
+                  <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                    <div className="flex items-start gap-2 text-sm text-yellow-800">
+                      <svg className="w-5 h-5 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                      <div>
+                        <p className="font-medium mb-1">Identity verification recommended</p>
+                        <p className="text-xs">For purchases over €1,000, identity verification is required. Consider verifying now to avoid delays.</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Payment Form or Buy Button */}
+                {paymentMethod === 'card' && amount && parseFloat(amount) >= MIN_INVESTMENT_AMOUNT ? (
+                  <KYCGate
+                    requiredAmount={amountInEur > 1000 ? 1000 : undefined}
+                    message={amountInEur > 1000 ? `To purchase tokens worth €${amountInEur.toFixed(2)}, identity verification is required.` : undefined}
+                  >
+                    <CardPaymentForm
+                      amount={parseFloat(amount)}
+                      currency="eur"
+                      onSuccess={(paymentIntentId, amount) => {
+                        handleCardPaymentSuccess(paymentIntentId, amount);
+                      }}
+                      onError={(error) => {
+                        setMessage({ type: 'error', text: error });
+                        showError(error);
+                      }}
+                      metadata={{
+                        type: 'token_purchase',
+                        tokens: tokensAmount,
+                      }}
+                    />
+                  </KYCGate>
+                ) : (
+                  <button
+                    onClick={handleBuy}
+                    disabled={!amount || parseFloat(amount) < MIN_INVESTMENT_AMOUNT || loading}
+                    className="w-full py-4 bg-accent-yellow text-black font-semibold text-lg rounded-xl hover:bg-accent-yellow-light transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {loading
+                      ? 'Processing...'
+                      : paymentMethod === 'crypto' && !isConnected
+                        ? 'Connect Wallet to Continue'
+                        : `Buy ${tokensAmount} $TAI Tokens`}
+                  </button>
+                )}
+              </>
+            );
+          })()}
 
           {/* Crypto Wallet Connection Notice */}
           {paymentMethod === 'crypto' && !isConnected && (

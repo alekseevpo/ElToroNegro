@@ -39,6 +39,10 @@ export interface PortfolioAsset {
 
 export interface UserProfile {
   username: string;
+  name?: string; // Display name
+  avatar?: string; // Avatar identifier (character from movies/series)
+  email?: string; // Email address
+  passwordHash?: string; // Hashed password (never store plain password!)
   referralCode: string;
   referredBy?: string; // Referral code of the user who invited this user
   wallets: {
@@ -57,6 +61,9 @@ export interface UserProfile {
   createdAt: number;
   referrals: string[]; // List of addresses that used this user's referral code
   transactions: Transaction[]; // Transaction history
+  emailVerified?: boolean; // Email verification status (for Google auth users)
+  emailVerificationToken?: string; // Token for email verification
+  emailVerificationSentAt?: number; // When verification email was sent
   kycStatus?: {
     verified: boolean;
     verificationDate?: number;
@@ -64,6 +71,14 @@ export interface UserProfile {
     provider?: 'stripe' | 'sumsub' | 'onfido' | 'custom';
     status?: 'pending' | 'verified' | 'failed' | 'expired';
   };
+  kycHistory?: Array<{
+    verificationId: string;
+    provider: 'stripe' | 'sumsub' | 'onfido' | 'custom';
+    status: 'pending' | 'processing' | 'verified' | 'failed' | 'expired' | 'canceled' | 'requires_input';
+    verificationDate: number;
+    completedDate?: number;
+    error?: string;
+  }>;
   portfolio?: PortfolioAsset[]; // User's portfolio assets
 }
 
@@ -366,7 +381,7 @@ export const getTransactionById = (address: string, transactionId: string): Tran
 };
 
 /**
- * Update KYC status for a user
+ * Update KYC status for a user and add to history
  */
 export const updateKYCStatus = (
   address: string,
@@ -375,22 +390,80 @@ export const updateKYCStatus = (
     verificationDate?: number;
     verificationId?: string;
     provider?: 'stripe' | 'sumsub' | 'onfido' | 'custom';
-    status?: 'pending' | 'verified' | 'failed' | 'expired';
+    status?: 'pending' | 'processing' | 'verified' | 'failed' | 'expired' | 'canceled' | 'requires_input';
+    error?: string;
   }
 ): UserProfile | null => {
   const profile = getUserProfile(address);
   if (!profile) return null;
 
+  // Initialize history if it doesn't exist
+  if (!profile.kycHistory) {
+    profile.kycHistory = [];
+  }
+
+  const verificationDate = status.verificationDate || Date.now();
+  const provider = status.provider || 'stripe';
+  const verificationStatus = status.status || (status.verified ? 'verified' : 'pending');
+  const verificationId = status.verificationId || `verification_${Date.now()}`;
+
+  // Update current status
   profile.kycStatus = {
     verified: status.verified,
-    verificationDate: status.verificationDate || Date.now(),
-    verificationId: status.verificationId,
-    provider: status.provider || 'stripe',
-    status: status.status || (status.verified ? 'verified' : 'pending'),
+    verificationDate,
+    verificationId,
+    provider,
+    status: verificationStatus,
   };
+
+  // Add to history (only if this is a new verification or status change)
+  const existingHistoryEntry = profile.kycHistory.find(
+    entry => entry.verificationId === verificationId
+  );
+
+  if (existingHistoryEntry) {
+    // Update existing entry
+    existingHistoryEntry.status = verificationStatus;
+    if (status.verified || verificationStatus === 'verified') {
+      existingHistoryEntry.completedDate = Date.now();
+    }
+    if (status.error) {
+      existingHistoryEntry.error = status.error;
+    }
+  } else {
+    // Add new entry to history
+    profile.kycHistory.unshift({
+      verificationId,
+      provider,
+      status: verificationStatus,
+      verificationDate,
+      completedDate: (status.verified || verificationStatus === 'verified') ? Date.now() : undefined,
+      error: status.error,
+    });
+  }
+
+  // Keep only last 50 entries to avoid localStorage bloat
+  if (profile.kycHistory.length > 50) {
+    profile.kycHistory = profile.kycHistory.slice(0, 50);
+  }
 
   saveUserProfile(address, profile);
   return profile;
+};
+
+/**
+ * Get KYC verification history for a user
+ */
+export const getKYCHistory = (address: string): Array<{
+  verificationId: string;
+  provider: 'stripe' | 'sumsub' | 'onfido' | 'custom';
+  status: 'pending' | 'processing' | 'verified' | 'failed' | 'expired' | 'canceled' | 'requires_input';
+  verificationDate: number;
+  completedDate?: number;
+  error?: string;
+}> => {
+  const profile = getUserProfile(address);
+  return profile?.kycHistory || [];
 };
 
 /**
@@ -581,6 +654,78 @@ export const getPortfolioStats = (address: string): {
     totalProfitPercent,
     totalInterestEarned,
     assetCount: portfolio.length,
+  };
+};
+
+/**
+ * Generate email verification token
+ */
+export const generateEmailVerificationToken = (email: string): string => {
+  const timestamp = Date.now();
+  const random = Math.random().toString(36).substring(2, 15);
+  // Use a simple encoding for browser compatibility
+  const tokenData = `${email}:${timestamp}:${random}`;
+  return btoa(tokenData).replace(/[+/=]/g, '');
+};
+
+/**
+ * Set email verification status for a user
+ */
+export const setEmailVerified = (address: string, verified: boolean): UserProfile | null => {
+  const profile = getUserProfile(address);
+  if (!profile) return null;
+
+  profile.emailVerified = verified;
+  if (verified) {
+    // Clear verification token after successful verification
+    delete profile.emailVerificationToken;
+    delete profile.emailVerificationSentAt;
+  }
+
+  saveUserProfile(address, profile);
+  return profile;
+};
+
+/**
+ * Set email verification token
+ */
+export const setEmailVerificationToken = (address: string, token: string): UserProfile | null => {
+  const profile = getUserProfile(address);
+  if (!profile) return null;
+
+  profile.emailVerificationToken = token;
+  profile.emailVerificationSentAt = Date.now();
+  profile.emailVerified = false;
+
+  saveUserProfile(address, profile);
+  return profile;
+};
+
+/**
+ * Check if email is verified
+ */
+export const isEmailVerified = (address: string): boolean => {
+  const profile = getUserProfile(address);
+  return profile?.emailVerified === true;
+};
+
+/**
+ * Get email verification status
+ */
+export const getEmailVerificationStatus = (address: string): {
+  verified: boolean;
+  token?: string;
+  sentAt?: number;
+} => {
+  const profile = getUserProfile(address);
+  if (!profile) {
+    return { verified: false };
+  }
+
+  return {
+    verified: profile.emailVerified === true,
+    token: profile.emailVerificationToken,
+    sentAt: profile.emailVerificationSentAt,
   };
 };
 

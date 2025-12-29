@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { memo } from 'react';
+import { useCryptoMarkets } from '@/hooks/useCryptoPrices';
 
 interface CryptoData {
   symbol: string;
@@ -10,73 +11,18 @@ interface CryptoData {
   marketCap: number;
 }
 
-export default function Features() {
-  const [cryptoData, setCryptoData] = useState<CryptoData[]>([]);
-  const [loading, setLoading] = useState(true);
+function Features() {
+  // Используем React Query для кэширования и управления состоянием
+  const { data: cryptoData = [], isLoading: loading, error } = useCryptoMarkets(['bitcoin', 'ethereum', 'binancecoin']);
 
-  useEffect(() => {
-    // Fetch crypto data from CoinGecko API
-    // Note: For production, you should use your own API key and proxy this through your backend
-    const fetchCryptoData = async () => {
-      // Create abort controller for timeout
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-      
-      try {
-        const response = await fetch(
-          'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=bitcoin,ethereum,binancecoin&order=market_cap_desc&per_page=3&page=1&sparkline=false&price_change_percentage=24h',
-          {
-            method: 'GET',
-            headers: {
-              'Accept': 'application/json',
-            },
-            signal: controller.signal,
-          }
-        );
-        
-        if (!response.ok) {
-          // If rate limited or server error, use fallback
-          if (response.status === 429 || response.status >= 500) {
-            throw new Error('API rate limit or server error');
-          }
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const data = await response.json();
-        
-        // Check if data is valid array
-        if (!Array.isArray(data) || data.length === 0) {
-          throw new Error('Invalid data format');
-        }
-        
-        const formattedData: CryptoData[] = data.map((coin: any) => ({
-          symbol: coin.symbol?.toUpperCase() || '',
-          name: coin.name || '',
-          price: coin.current_price || 0,
-          change24h: coin.price_change_percentage_24h || 0,
-          marketCap: coin.market_cap || 0,
-        }));
-        
-        clearTimeout(timeoutId);
-        setCryptoData(formattedData);
-      } catch (error: any) {
-        // Only log if it's not a network/timeout error
-        if (error.name !== 'AbortError' && !error.message?.includes('fetch') && error.name !== 'TypeError') {
-          console.error('Error fetching crypto data:', error);
-        }
-        // Fallback data
-        setCryptoData([
-          { symbol: 'BTC', name: 'Bitcoin', price: 43500, change24h: 2.5, marketCap: 850000000000 },
-          { symbol: 'ETH', name: 'Ethereum', price: 2650, change24h: 1.8, marketCap: 320000000000 },
-          { symbol: 'BNB', name: 'Binance Coin', price: 315, change24h: -0.5, marketCap: 47000000000 },
-        ]);
-      } finally {
-        setLoading(false);
-      }
-    };
+  // Fallback данные в случае ошибки
+  const fallbackData: CryptoData[] = [
+    { symbol: 'BTC', name: 'Bitcoin', price: 43500, change24h: 2.5, marketCap: 850000000000 },
+    { symbol: 'ETH', name: 'Ethereum', price: 2650, change24h: 1.8, marketCap: 320000000000 },
+    { symbol: 'BNB', name: 'Binance Coin', price: 315, change24h: -0.5, marketCap: 47000000000 },
+  ];
 
-    fetchCryptoData();
-  }, []);
+  const displayData = error ? fallbackData : cryptoData;
 
   const features = [
     {
@@ -183,7 +129,7 @@ export default function Features() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {cryptoData.map((crypto, index) => (
+              {displayData.map((crypto, index) => (
                 <div 
                   key={index}
                   className="p-6 bg-primary-gray rounded-xl border-2 border-primary-gray-light hover:border-accent-yellow hover:shadow-lg transition-all"
@@ -228,3 +174,5 @@ export default function Features() {
     </section>
   );
 }
+
+export default memo(Features);

@@ -1,16 +1,31 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import WalletButton from './WalletButton';
+import LoginModal from './LoginModal';
+import KYCBadge from './KYCBadge';
 import { useAuth } from '@/contexts/AuthContext';
 
 export default function Header() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
   const { user } = useAuth();
+
+  // Listen for custom event to open login modal
+  useEffect(() => {
+    const handleOpenLoginModal = () => {
+      setIsLoginModalOpen(true);
+    };
+
+    window.addEventListener('openLoginModal', handleOpenLoginModal);
+    return () => {
+      window.removeEventListener('openLoginModal', handleOpenLoginModal);
+    };
+  }, []);
 
   // Base navigation items
   const baseNavigation = [
@@ -57,6 +72,15 @@ export default function Header() {
           </div>
 
           <div className="flex items-center space-x-4">
+            {!user?.isConnected && (
+              <button
+                onClick={() => setIsLoginModalOpen(true)}
+                className="px-4 py-2 text-sm font-medium text-primary-gray-lighter hover:text-accent-yellow transition-colors"
+              >
+                Log In
+              </button>
+            )}
+            {user?.isConnected && <KYCBadge showText={false} size="sm" />}
             <WalletButton />
             
             {/* Mobile menu button */}
@@ -104,6 +128,7 @@ export default function Header() {
           </div>
         )}
       </nav>
+      <LoginModal isOpen={isLoginModalOpen} onClose={() => setIsLoginModalOpen(false)} />
     </header>
   );
 }

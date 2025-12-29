@@ -1,40 +1,48 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getReferralStats, getReferredUsers, getUserProfile, calculateReferralBonus, type UserProfile } from '@/lib/profile-utils';
+import { useProfile } from '@/hooks/useProfile';
+import { calculateReferralBonus } from '@/lib/profile-utils';
+import { logger } from '@/lib/logger';
 
 interface ReferralsTabProps {
   account: string;
 }
 
 export default function ReferralsTab({ account }: ReferralsTabProps) {
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [referredUsers, setReferredUsers] = useState<UserProfile[]>([]);
+  const { profile, loading: profileLoading } = useProfile(account);
+  const [referredUsers, setReferredUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     loadReferrals();
-  }, [account]);
+  }, [account, profile]);
 
-  const loadReferrals = () => {
+  const loadReferrals = async () => {
     if (!account) {
       setLoading(false);
       return;
     }
 
-    const userProfile = getUserProfile(account);
-    if (userProfile) {
-      setProfile(userProfile);
-      const referred = getReferredUsers(account);
-      setReferredUsers(referred);
+    if (profile) {
+      // Fetch referrals from API
+      try {
+        const response = await fetch(`/api/profile/${account}/referrals`);
+        if (response.ok) {
+          const data = await response.json();
+          setReferredUsers(data.referrals || []);
+        }
+      } catch (error) {
+        logger.error('Error loading referrals', error, { account });
+      }
     }
     setLoading(false);
   };
 
-  const stats = getReferralStats(account);
-  const bonusPercentage = calculateReferralBonus(stats.totalReferrals);
+  const totalReferrals = profile?.referrals?.length || 0;
+  const bonusPercentage = calculateReferralBonus(totalReferrals);
 
-  if (loading) {
+  if (loading || profileLoading) {
     return (
       <div className="bg-primary-gray rounded-xl p-6 shadow-sm border border-primary-gray-light">
         <p className="text-primary-gray-lighter">Loading referrals...</p>
@@ -58,7 +66,7 @@ export default function ReferralsTab({ account }: ReferralsTabProps) {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-primary-gray-lighter mb-1">Total Referrals</p>
-              <p className="text-3xl font-bold text-white">{stats.totalReferrals}</p>
+              <p className="text-3xl font-bold text-white">{totalReferrals}</p>
             </div>
             <div className="w-12 h-12 bg-black border border-primary-gray-light rounded-lg flex items-center justify-center">
               <svg className="w-6 h-6 text-accent-yellow" fill="none" stroke="currentColor" viewBox="0 0 24 24">

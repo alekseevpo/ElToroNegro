@@ -1,0 +1,144 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User Profile - основная таблица пользователей
+model User {
+  id           String  @id @default(cuid())
+  address      String  @unique // Ethereum address или email для Google auth
+  username     String  @unique
+  name         String? // Display name
+  avatar       String? // Avatar identifier
+  email        String? @unique
+  passwordHash String? // Hashed password (never store plain password!)
+  referralCode String  @unique
+  referredById String? // ID of the user who invited this user
+
+  // Email verification
+  emailVerified           Boolean   @default(false)
+  emailVerificationToken  String?
+  emailVerificationSentAt DateTime?
+
+  // KYC Status
+  kycVerified         Boolean   @default(false)
+  kycVerificationId   String?
+  kycProvider         String? // 'stripe' | 'sumsub' | 'onfido' | 'custom'
+  kycStatus           String? // 'pending' | 'processing' | 'verified' | 'failed' | 'expired' | 'canceled' | 'requires_input'
+  kycVerificationDate DateTime?
+  kycCompletedDate    DateTime?
+  kycError            String?
+
+  // Relations
+  wallets           Wallet[]
+  socialConnections SocialConnection[]
+  transactions      Transaction[]
+  portfolioAssets   PortfolioAsset[]
+  kycHistory        KYCVerification[]
+  // Referrals - users who were referred by this user's referral code
+  referrals         User[]             @relation("UserReferrals")
+  // The user who referred this user
+  referredByUser    User?              @relation("UserReferrals", fields: [referredById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([email])
+  @@index([referralCode])
+  @@index([address])
+}
+
+// Connected Wallets
+model Wallet {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String // 'metamask' | 'ton' | 'walletconnect' | 'coinbase' | 'trustwallet'
+  address   String
+  createdAt DateTime @default(now())
+
+  @@unique([userId, type])
+  @@index([userId])
+}
+
+// Social Connections
+model SocialConnection {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String // 'twitter' | 'telegram' | 'discord' | 'email'
+  socialId  String
+  createdAt DateTime @default(now())
+
+  @@unique([userId, type])
+  @@index([userId])
+}
+
+// Transactions
+model Transaction {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type            String // 'token_purchase' | 'investment' | 'withdrawal' | 'lottery_ticket' | 'btc_bet'
+  status          String // 'pending' | 'completed' | 'failed'
+  amount          String // Amount in EUR or ETH
+  currency        String // 'EUR' | 'ETH' | 'TAI'
+  tokensAmount    String? // Amount of tokens (for token purchases)
+  description     String
+  txHash          String? // Blockchain transaction hash
+  paymentMethod   String? // 'card' | 'crypto' | 'stripe'
+  stripeSessionId String?
+  metadata        Json? // Additional data as JSON
+  timestamp       DateTime @default(now())
+
+  @@index([userId])
+  @@index([userId, type])
+  @@index([timestamp])
+}
+
+// Portfolio Assets
+model PortfolioAsset {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type           String // 'token' | 'stock' | 'commodity' | 'crypto' | 'fiat'
+  symbol         String
+  name           String
+  quantity       Float
+  purchasePrice  Float
+  currentPrice   Float
+  purchaseDate   DateTime
+  currency       String // 'EUR' | 'ETH' | 'USD'
+  totalCost      Float
+  totalValue     Float
+  profit         Float
+  profitPercent  Float
+  interestEarned Float?   @default(0)
+  interestRate   Float?
+
+  @@index([userId])
+  @@index([userId, symbol])
+}
+
+// KYC Verification History
+model KYCVerification {
+  id               String    @id @default(cuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  verificationId   String
+  provider         String // 'stripe' | 'sumsub' | 'onfido' | 'custom'
+  status           String // 'pending' | 'processing' | 'verified' | 'failed' | 'expired' | 'canceled' | 'requires_input'
+  verificationDate DateTime  @default(now())
+  completedDate    DateTime?
+  error            String?
+
+  @@index([userId])
+  @@index([verificationId])
+}

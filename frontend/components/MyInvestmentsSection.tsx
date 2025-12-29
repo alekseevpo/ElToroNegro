@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useInvestmentPool } from '@/hooks/useInvestmentPool';
 import { useAuth } from '@/contexts/AuthContext';
 import { addTransaction, isKYCVerified } from '@/lib/profile-utils';
+import KYCGate from './KYCGate';
 
 interface UserInvestment {
   amount: string;
@@ -228,13 +229,17 @@ export default function MyInvestmentsSection() {
           )}
 
           {availableInvestments.length > 0 && (
-            <button
-              onClick={handleWithdrawAll}
-              disabled={withdrawingIndex === -1}
-              className="mb-6 px-6 py-3 bg-accent-yellow text-black font-medium rounded-lg hover:bg-accent-yellow-light disabled:opacity-50 disabled:cursor-not-allowed"
+            <KYCGate
+              message="Identity verification is required for all withdrawals. This helps us comply with financial regulations and protect all users."
             >
-              {withdrawingIndex === -1 ? 'Withdrawing...' : `Withdraw All (${availableInvestments.length})`}
-            </button>
+              <button
+                onClick={handleWithdrawAll}
+                disabled={withdrawingIndex === -1}
+                className="mb-6 px-6 py-3 bg-accent-yellow text-black font-medium rounded-lg hover:bg-accent-yellow-light disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {withdrawingIndex === -1 ? 'Withdrawing...' : `Withdraw All (${availableInvestments.length})`}
+              </button>
+            </KYCGate>
           )}
         </div>
 
@@ -286,13 +291,17 @@ export default function MyInvestmentsSection() {
                         <p className="text-sm font-medium text-white">{formatDate(investment.withdrawTime)}</p>
                       </div>
                     </div>
-                    <button
-                      onClick={() => handleWithdraw(actualIndex)}
-                      disabled={withdrawingIndex === actualIndex}
-                      className="w-full py-2 bg-accent-yellow text-black font-medium rounded-lg hover:bg-accent-yellow-light disabled:opacity-50"
+                    <KYCGate
+                      message="Identity verification is required for all withdrawals. This helps us comply with financial regulations and protect all users."
                     >
-                      {withdrawingIndex === actualIndex ? 'Withdrawing...' : 'Withdraw'}
-                    </button>
+                      <button
+                        onClick={() => handleWithdraw(actualIndex)}
+                        disabled={withdrawingIndex === actualIndex}
+                        className="w-full py-2 bg-accent-yellow text-black font-medium rounded-lg hover:bg-accent-yellow-light disabled:opacity-50"
+                      >
+                        {withdrawingIndex === actualIndex ? 'Withdrawing...' : 'Withdraw'}
+                      </button>
+                    </KYCGate>
                   </div>
                 );
               })}
