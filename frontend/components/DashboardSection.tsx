@@ -6,7 +6,6 @@ import Link from 'next/link';
 import { useInvestmentPool } from '@/hooks/useInvestmentPool';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProfile } from '@/hooks/useProfile';
-import { ethers } from 'ethers';
 import KYCBadge from './KYCBadge';
 import { DashboardSkeleton } from './SkeletonLoader';
 import Avatar from './Avatar';
@@ -17,7 +16,10 @@ import { logger } from '@/lib/logger';
 const ProfileTab = dynamic(() => import('./ProfileTab'), { ssr: false });
 const ReferralsTab = dynamic(() => import('./ReferralsTab'), { ssr: false });
 const TransactionsTab = dynamic(() => import('./TransactionsTab'), { ssr: false });
-const PortfolioChart = dynamic(() => import('./PortfolioChart'), { ssr: false });
+const PortfolioChart = dynamic(() => import('./PortfolioChart'), { 
+  ssr: false,
+  loading: () => <div className="h-64 flex items-center justify-center text-primary-gray-lighter">Loading chart...</div>
+});
 
 function DashboardSection() {
   const { user, refreshBalance } = useAuth();
@@ -36,7 +38,7 @@ function DashboardSection() {
   const [investments, setInvestments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [taiTokenBalance, setTaiTokenBalance] = useState<number>(0);
-  const [activeTab, setActiveTab] = useState<'overview' | 'investments' | 'referrals' | 'transactions' | 'profile'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'referrals' | 'transactions' | 'profile'>('overview');
   const [kycBannerDismissed, setKycBannerDismissed] = useState<boolean>(false);
 
   const loadData = useCallback(async () => {
@@ -49,28 +51,22 @@ function DashboardSection() {
       const userInvestments = await getUserInvestments(account);
       setInvestments(userInvestments);
       
-      // Загрузить баланс $TAI токенов из портфеля
-      if (profile) {
-        const portfolio = profile.portfolio || [];
-        const taiAsset = portfolio.find(asset => asset.symbol === 'TAI' && asset.type === 'token');
-        setTaiTokenBalance(taiAsset ? taiAsset.quantity : 0);
-      }
-      
       await refreshBalance();
     } catch (error: unknown) {
       logger.error('Error loading dashboard data', error, { account });
     } finally {
       setLoading(false);
     }
-  }, [account, getUserStats, getUserInvestments, profile, refreshBalance]);
+  }, [account, getUserStats, getUserInvestments, refreshBalance]);
 
   useEffect(() => {
     if (account && isConnected) {
       loadData();
       
-      // Check if KYC banner was dismissed (within last 24 hours)
+      // Check if KYC banner was dismissed (stored in profile metadata or use sessionStorage for client-side only)
+      // Using sessionStorage instead of localStorage for better privacy
       if (typeof window !== 'undefined' && account) {
-        const dismissedTime = localStorage.getItem(`kyc_reminder_dismissed_${account}`);
+        const dismissedTime = sessionStorage.getItem(`kyc_reminder_dismissed_${account}`);
         if (dismissedTime) {
           const dismissedTimestamp = parseInt(dismissedTime, 10);
           const hoursSinceDismissal = (Date.now() - dismissedTimestamp) / (1000 * 60 * 60);
@@ -79,7 +75,7 @@ function DashboardSection() {
             setKycBannerDismissed(true);
           } else {
             // Remove old dismissal entry
-            localStorage.removeItem(`kyc_reminder_dismissed_${account}`);
+            sessionStorage.removeItem(`kyc_reminder_dismissed_${account}`);
           }
         }
       }
@@ -171,7 +167,7 @@ function DashboardSection() {
               {account && <KYCBadge size="md" />}
             </div>
             
-            {/* Email Verification Banner - Show for Google users */}
+            {/* Email Verification Banner - Show for wallet users only (Google users email is already verified) */}
             <EmailVerificationBanner />
             
             {/* KYC Reminder Banner */}
@@ -199,7 +195,7 @@ function DashboardSection() {
                   onClick={() => {
                     // Store dismissal in localStorage and hide banner
                     if (typeof window !== 'undefined' && account) {
-                      localStorage.setItem(`kyc_reminder_dismissed_${account}`, Date.now().toString());
+                      sessionStorage.setItem(`kyc_reminder_dismissed_${account}`, Date.now().toString());
                       setKycBannerDismissed(true);
                     }
                   }}
@@ -220,10 +216,9 @@ function DashboardSection() {
           <nav className="flex space-x-8">
             {[
               { id: 'overview', label: 'Overview' },
-              { id: 'investments', label: 'My Investments' },
               { id: 'referrals', label: 'Referrals' },
               { id: 'transactions', label: 'Transactions' },
-              { id: 'profile', label: 'Profile' }
+              { id: 'profile', label: 'Profile Settings' }
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -462,18 +457,6 @@ function DashboardSection() {
                 </div>
               </div>
             )}
-          </div>
-        )}
-
-        {/* Investments Tab */}
-        {activeTab === 'investments' && (
-          <div>
-            <Link href="/my-investments" className="inline-block mb-6 text-accent-yellow hover:text-accent-yellow-light font-medium">
-              ← Go to Full Investment Details
-            </Link>
-            <div className="bg-primary-gray rounded-xl p-6 shadow-sm border border-primary-gray-light">
-              <p className="text-primary-gray-lighter">For detailed investment management, please visit the <Link href="/my-investments" className="text-accent-yellow hover:text-accent-yellow-light font-medium">My Investments</Link> page.</p>
-            </div>
           </div>
         )}
 
