@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getPlatformStats } from '@/lib/db-profile-utils';
+import { logger } from '@/lib/logger';
 
 /**
  * API Route for platform statistics
@@ -14,7 +15,7 @@ export async function GET() {
       },
     });
   } catch (error) {
-    console.error('Error fetching stats:', error);
+    logger.error('Error fetching stats', error as Error);
     return NextResponse.json(
       {
         activeToday: 0,

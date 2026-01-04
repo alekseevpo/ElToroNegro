@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
@@ -13,6 +13,7 @@ import { useProfileMutation } from '@/hooks/useProfileMutation';
 import KYCVerification from './KYCVerification';
 import Avatar from './Avatar';
 import KYCBadge from './KYCBadge';
+import TonConnectButtonWrapper from './TonConnectButton';
 import { AVAILABLE_AVATARS, getAvatarEmoji } from '@/lib/avatars';
 import { hashPasswordForStorage } from '@/lib/password-utils';
 import { logger } from '@/lib/logger';
@@ -23,7 +24,7 @@ interface ProfileTabProps {
 }
 
 export default function ProfileTab({ account }: ProfileTabProps) {
-  const { user } = useAuth();
+  const { user, connect } = useAuth();
   const searchParams = useSearchParams();
   const { profile, loading: profileLoading, error: profileError, refetch } = useProfile(account);
   const { createProfile, updateProfile, loading: mutationLoading, error: mutationError } = useProfileMutation();
@@ -55,6 +56,9 @@ export default function ProfileTab({ account }: ProfileTabProps) {
     }
   }, [searchParams]);
 
+  // Track if referral code has been applied to prevent infinite loops
+  const referralCodeAppliedRef = useRef(false);
+
   // Initialize inputs when profile loads
   useEffect(() => {
     if (profile) {
@@ -66,27 +70,34 @@ export default function ProfileTab({ account }: ProfileTabProps) {
       const defaultUsername = `user_${account.slice(2, 8)}`;
       setUsernameInput(defaultUsername);
     }
-  }, [profile, profileLoading, account, user]);
+  }, [profile?.username, profile?.name, profile?.email, profileLoading, account, user?.name]);
 
-  // Handle referral code from URL
-  useEffect(() => {
-    if (!account || !profile) return;
-    
-    const refFromUrl = searchParams?.get('ref');
-    if (refFromUrl && !profile.referredBy) {
-      handleApplyReferralCode(refFromUrl);
-    }
-  }, [account, profile, searchParams]);
-
-  const handleApplyReferralCode = async (referralCode: string) => {
+  // Memoize handleApplyReferralCode to prevent infinite loops
+  const handleApplyReferralCode = useCallback(async (referralCode: string) => {
     if (!account || !isValidReferralCode(referralCode)) return;
+    
+    // Prevent applying the same referral code multiple times
+    if (referralCodeAppliedRef.current) return;
+    referralCodeAppliedRef.current = true;
     
     const updated = await updateProfile(account, { referredBy: referralCode });
     if (updated) {
       setMessage({ type: 'success', text: 'Referral code applied successfully!' });
       refetch();
+    } else {
+      referralCodeAppliedRef.current = false; // Reset if failed
     }
-  };
+  }, [account, updateProfile, refetch]);
+
+  // Handle referral code from URL (only once)
+  useEffect(() => {
+    if (!account || !profile || referralCodeAppliedRef.current) return;
+    
+    const refFromUrl = searchParams?.get('ref');
+    if (refFromUrl && profile && !profile.referredBy && isValidReferralCode(refFromUrl)) {
+      handleApplyReferralCode(refFromUrl);
+    }
+  }, [account, profile?.referredBy, searchParams, handleApplyReferralCode]);
 
   const handleSaveUsername = async () => {
     if (!usernameInput.trim()) {
@@ -263,7 +274,7 @@ export default function ProfileTab({ account }: ProfileTabProps) {
     }
   };
 
-  const handleConnectWallet = async (walletType: 'coinbase' | 'trustwallet') => {
+  const handleConnectWallet = async (walletType: 'metamask' | 'ton' | 'coinbase' | 'trustwallet') => {
     if (!account || !profile) {
       setMessage({ type: 'error', text: 'Profile not found' });
       return;
@@ -272,23 +283,68 @@ export default function ProfileTab({ account }: ProfileTabProps) {
     setConnectingWallet(walletType);
     setMessage(null);
     
-    // Simulate wallet connection (in production, implement actual wallet connection)
-    setTimeout(async () => {
-      // For demo purposes, use a mock address
-      const mockAddress = `0x${Math.random().toString(16).substr(2, 40)}`;
-      const wallets = { ...profile.wallets, [walletType]: mockAddress };
-      const updated = await updateProfile(account, { wallets });
-      if (updated) {
-        setMessage({ type: 'success', text: `${walletType} connected successfully!` });
-        refetch();
+    try {
+      let walletAddress: string | null = null;
+
+      if (walletType === 'metamask') {
+        // Real MetaMask connection
+        if (typeof window === 'undefined' || !(window as any).ethereum) {
+          setMessage({ type: 'error', text: 'MetaMask is not installed. Please install MetaMask extension.' });
+          setConnectingWallet(null);
+          return;
+        }
+        
+        await connect('metamask');
+        // Get connected address from user context (will be updated by connect)
+        // We need to wait a bit for the user context to update
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        if (user?.address && user.address.startsWith('0x')) {
+          walletAddress = user.address;
+        } else {
+          // Try to get from ethereum provider directly
+          const ethereum = (window as any).ethereum;
+          const accounts = await ethereum.request({ method: 'eth_accounts' });
+          if (accounts && accounts.length > 0) {
+            walletAddress = accounts[0];
+          }
+        }
+      } else if (walletType === 'ton') {
+        // TON wallet connection - handled via TonConnectButton component
+        // The button will handle the connection and we'll save it via callback
+        setMessage({ type: 'info', text: 'Please use the TON Connect button below to connect your TON wallet.' });
+        setConnectingWallet(null);
+        return;
       } else {
-        setMessage({ type: 'error', text: mutationError || `Failed to connect ${walletType}` });
+        // Coinbase and TrustWallet - for now use mock (they require specific SDKs)
+        setMessage({ type: 'error', text: `${walletType} wallet connection is not yet implemented. Coming soon!` });
+        setConnectingWallet(null);
+        return;
       }
+
+      if (walletAddress) {
+        // Save wallet to profile
+        const wallets = { ...profile.wallets, [walletType]: walletAddress };
+        const updated = await updateProfile(account, { wallets });
+        if (updated) {
+          setMessage({ type: 'success', text: `${walletType} connected successfully!` });
+          refetch();
+        } else {
+          setMessage({ type: 'error', text: mutationError || `Failed to save ${walletType} wallet` });
+        }
+      } else {
+        setMessage({ type: 'error', text: `Failed to get ${walletType} wallet address` });
+      }
+    } catch (error: unknown) {
+      const { message } = handleError(error);
+      logger.error('Error connecting wallet', error);
+      setMessage({ type: 'error', text: message || `Failed to connect ${walletType}` });
+    } finally {
       setConnectingWallet(null);
-    }, 1000);
+    }
   };
 
-  const handleDisconnectWallet = async (walletType: 'coinbase' | 'trustwallet') => {
+  const handleDisconnectWallet = async (walletType: 'metamask' | 'ton' | 'coinbase' | 'trustwallet') => {
     if (!account || !profile) {
       setMessage({ type: 'error', text: 'Profile not found' });
       return;
@@ -451,7 +507,7 @@ export default function ProfileTab({ account }: ProfileTabProps) {
 
   // Calculate profile stats
   const portfolio = profile?.portfolio || [];
-  const totalPortfolioValue = portfolio.reduce((sum, asset) => sum + (asset.currentValue || 0), 0);
+  const totalPortfolioValue = portfolio.reduce((sum, asset) => sum + (asset.totalValue || 0), 0);
   const memberSince = profile ? new Date(profile.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'long' }) : '';
 
   return (
@@ -512,7 +568,7 @@ export default function ProfileTab({ account }: ProfileTabProps) {
         <div className="bg-primary-gray rounded-xl p-4 border border-primary-gray-light">
           <p className="text-sm text-primary-gray-lighter mb-1">Connected Wallets</p>
           <p className="text-2xl font-bold text-white">
-            {Object.values(profile?.wallets || {}).filter(Boolean).length + (user?.isConnected ? 1 : 0)}
+            {Object.values(profile?.wallets || {}).filter(Boolean).length}
           </p>
         </div>
         <div className="bg-primary-gray rounded-xl p-4 border border-primary-gray-light">
@@ -663,19 +719,19 @@ export default function ProfileTab({ account }: ProfileTabProps) {
                   onChange={(e) => setUsernameInput(e.target.value)}
                   placeholder="Enter username"
                   className="flex-1 px-4 py-2 bg-black border border-primary-gray-light rounded-lg focus:ring-2 focus:ring-accent-yellow focus:border-accent-yellow text-white placeholder-gray-500"
-                  disabled={!!profile.username}
+                  disabled={!!profile?.username}
                 />
                 <button
                   onClick={handleSaveUsername}
                   className="px-4 py-2 bg-accent-yellow text-black rounded-lg hover:bg-accent-yellow-light transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  disabled={!!profile.username}
+                  disabled={!!profile?.username}
                 >
-                  {profile.username ? 'Locked' : 'Save'}
+                  {profile?.username ? 'Locked' : 'Save'}
                 </button>
               </div>
             ) : (
               <div className="p-3 bg-black rounded-lg border border-primary-gray-light flex items-center justify-between">
-                <p className="font-semibold text-white">{profile.username}</p>
+                <p className="font-semibold text-white">{profile?.username}</p>
                 <span className="text-xs text-primary-gray-lighter">Immutable</span>
               </div>
             )}
@@ -840,7 +896,7 @@ export default function ProfileTab({ account }: ProfileTabProps) {
             <label className="block text-sm font-medium text-primary-gray-lighter mb-2">Your Referral Code</label>
             <div className="flex gap-2">
               <div className="flex-1 p-3 bg-black rounded-lg border border-primary-gray-light">
-                <p className="font-mono text-lg font-bold text-white">{profile.referralCode}</p>
+                <p className="font-mono text-lg font-bold text-white">{profile?.referralCode || 'N/A'}</p>
               </div>
               <button
                 onClick={copyReferralCode}
@@ -858,7 +914,7 @@ export default function ProfileTab({ account }: ProfileTabProps) {
           </div>
 
           {/* Enter Referral Code */}
-          {!profile.referredBy && (
+          {!profile?.referredBy && (
             <div>
               <label className="block text-sm font-medium text-primary-gray-lighter mb-2">
                 Enter Referral Code (optional)
@@ -886,11 +942,11 @@ export default function ProfileTab({ account }: ProfileTabProps) {
           )}
 
           {/* Referred By */}
-          {profile.referredBy && (
+          {profile?.referredBy && (
             <div>
               <label className="block text-sm font-medium text-primary-gray-lighter mb-2">Referred By</label>
               <div className="p-3 bg-black rounded-lg border border-primary-gray-light">
-                <p className="font-mono font-semibold text-white">{profile.referredBy}</p>
+                <p className="font-mono font-semibold text-white">{profile?.referredBy || ''}</p>
               </div>
             </div>
           )}
@@ -902,23 +958,87 @@ export default function ProfileTab({ account }: ProfileTabProps) {
         <h2 className="text-xl font-bold text-white mb-6">Connected Wallets</h2>
         
         <div className="space-y-3">
-          {/* MetaMask - always shown if connected */}
-          {user?.isConnected && (
-            <div className="flex items-center justify-between p-4 border border-primary-gray-light rounded-lg">
+          {/* MetaMask */}
+          <div className="flex items-center justify-between p-4 border border-primary-gray-light rounded-lg">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 bg-black border border-primary-gray-light rounded-lg flex items-center justify-center">
+                <svg className="w-6 h-6 text-primary-gray-lighter" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <path d="M22 12L12 2L2 12L6 12L6 22L10 22L10 16L14 16L14 22L18 22L18 12Z" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </div>
+              <div>
+                <p className="font-semibold text-white">MetaMask</p>
+                <p className="text-sm text-primary-gray-lighter">
+                  {profile?.wallets?.metamask ? `${profile.wallets.metamask.slice(0, 6)}...${profile.wallets.metamask.slice(-4)}` : 'Not connected'}
+                </p>
+              </div>
+            </div>
+            {profile?.wallets?.metamask ? (
+              <button
+                onClick={() => handleDisconnectWallet('metamask')}
+                className="px-4 py-2 text-sm text-red-400 hover:text-red-300 font-medium"
+              >
+                Disconnect
+              </button>
+            ) : (
+              <button
+                onClick={() => handleConnectWallet('metamask')}
+                disabled={connectingWallet === 'metamask'}
+                className="px-4 py-2 bg-accent-yellow text-black text-sm rounded-lg hover:bg-accent-yellow-light transition-colors disabled:opacity-50"
+              >
+                {connectingWallet === 'metamask' ? 'Connecting...' : 'Connect'}
+              </button>
+            )}
+          </div>
+
+          {/* TON Wallet */}
+          <div className="p-4 border border-primary-gray-light rounded-lg">
+            <div className="flex items-center justify-between mb-3">
               <div className="flex items-center space-x-3">
                 <div className="w-10 h-10 bg-black border border-primary-gray-light rounded-lg flex items-center justify-center">
-                  <svg className="w-6 h-6 text-primary-gray-lighter" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                    <path d="M22 12L12 2L2 12L6 12L6 22L10 22L10 16L14 16L14 22L18 22L18 12Z" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
+                  <span className="text-primary-gray-lighter text-lg font-bold">TON</span>
                 </div>
                 <div>
-                  <p className="font-semibold text-white">MetaMask</p>
-                  <p className="text-sm text-primary-gray-lighter">{account.slice(0, 6)}...{account.slice(-4)}</p>
+                  <p className="font-semibold text-white">TON Wallet</p>
+                  <p className="text-sm text-primary-gray-lighter">
+                    {profile?.wallets?.ton ? `${profile.wallets.ton.slice(0, 6)}...${profile.wallets.ton.slice(-4)}` : 'Not connected'}
+                  </p>
                 </div>
               </div>
-              <span className="px-3 py-1 bg-accent-yellow text-black text-xs font-medium rounded-full">Connected</span>
+              {profile?.wallets?.ton && (
+                <button
+                  onClick={() => handleDisconnectWallet('ton')}
+                  className="px-4 py-2 text-sm text-red-400 hover:text-red-300 font-medium"
+                >
+                  Disconnect
+                </button>
+              )}
             </div>
-          )}
+            {!profile?.wallets?.ton && (
+              <TonConnectButtonWrapper 
+                onConnect={async (address: string) => {
+                  if (!account || !profile) {
+                    setMessage({ type: 'error', text: 'Profile not found' });
+                    return;
+                  }
+                  try {
+                    const wallets = { ...profile.wallets, ton: address };
+                    const updated = await updateProfile(account, { wallets });
+                    if (updated) {
+                      setMessage({ type: 'success', text: 'TON wallet connected successfully!' });
+                      refetch();
+                    } else {
+                      setMessage({ type: 'error', text: mutationError || 'Failed to save TON wallet' });
+                    }
+                  } catch (error: unknown) {
+                    const { message } = handleError(error);
+                    logger.error('Error saving TON wallet', error);
+                    setMessage({ type: 'error', text: message || 'Failed to save TON wallet' });
+                  }
+                }}
+              />
+            )}
+          </div>
 
           {/* Coinbase Wallet */}
           <div className="flex items-center justify-between p-4 border border-primary-gray-light rounded-lg">
@@ -932,11 +1052,11 @@ export default function ProfileTab({ account }: ProfileTabProps) {
               <div>
                 <p className="font-semibold text-white">Coinbase Wallet</p>
                 <p className="text-sm text-primary-gray-lighter">
-                  {profile.wallets.coinbase ? `${profile.wallets.coinbase.slice(0, 6)}...${profile.wallets.coinbase.slice(-4)}` : 'Not connected'}
+                  {profile?.wallets?.coinbase ? `${profile.wallets.coinbase.slice(0, 6)}...${profile.wallets.coinbase.slice(-4)}` : 'Not connected'}
                 </p>
               </div>
             </div>
-            {profile.wallets.coinbase ? (
+            {profile?.wallets?.coinbase ? (
               <button
                 onClick={() => handleDisconnectWallet('coinbase')}
                 className="px-4 py-2 text-sm text-red-400 hover:text-red-300 font-medium"
@@ -966,11 +1086,11 @@ export default function ProfileTab({ account }: ProfileTabProps) {
               <div>
                 <p className="font-semibold text-white">Trust Wallet</p>
                 <p className="text-sm text-primary-gray-lighter">
-                  {profile.wallets.trustwallet ? `${profile.wallets.trustwallet.slice(0, 6)}...${profile.wallets.trustwallet.slice(-4)}` : 'Not connected'}
+                  {profile?.wallets?.trustwallet ? `${profile.wallets.trustwallet.slice(0, 6)}...${profile.wallets.trustwallet.slice(-4)}` : 'Not connected'}
                 </p>
               </div>
             </div>
-            {profile.wallets.trustwallet ? (
+            {profile?.wallets?.trustwallet ? (
               <button
                 onClick={() => handleDisconnectWallet('trustwallet')}
                 className="px-4 py-2 text-sm text-red-400 hover:text-red-300 font-medium"
@@ -1002,8 +1122,8 @@ export default function ProfileTab({ account }: ProfileTabProps) {
             { key: 'email', label: 'Email', icon: '✉' },
           ].map((social) => {
             const socialKey = social.key as 'twitter' | 'telegram' | 'discord' | 'email';
-            const isConnected = !!profile.socialConnections[socialKey];
-            const socialId = profile.socialConnections[socialKey];
+            const isConnected = !!profile?.socialConnections?.[socialKey];
+            const socialId = profile?.socialConnections?.[socialKey];
             
             return (
               <div key={social.key} className="flex items-center justify-between p-4 border border-primary-gray-light rounded-lg">

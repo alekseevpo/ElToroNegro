@@ -3,11 +3,11 @@
 import { useCryptoPrice } from './useCryptoPrices';
 
 /**
- * Hook to get current ETH price in EUR
+ * Hook to get current ETH price in USD
  * Uses CoinGecko API with caching via React Query
  * 
  * @returns {Object} Object containing:
- *   - price: ETH price in EUR (number | undefined)
+ *   - price: ETH price in USD (number | undefined)
  *   - isLoading: loading state (boolean)
  *   - error: error state (Error | null)
  *   - refetch: function to manually refetch the price
@@ -20,13 +20,13 @@ export function useETHPrice() {
     isLoading,
     error: error as Error | null,
     refetch,
-    // Helper function to convert EUR to ETH
-    eurToEth: (eurAmount: number): number | undefined => {
+    // Helper function to convert USD to ETH
+    usdToEth: (usdAmount: number): number | undefined => {
       if (!data?.price || data.price <= 0) return undefined;
-      return eurAmount / data.price;
+      return usdAmount / data.price;
     },
-    // Helper function to convert ETH to EUR
-    ethToEur: (ethAmount: number): number | undefined => {
+    // Helper function to convert ETH to USD
+    ethToUsd: (ethAmount: number): number | undefined => {
       if (!data?.price || data.price <= 0) return undefined;
       return ethAmount * data.price;
     },

@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
   } catch (error: any) {
     console.error('Error initiating Google OAuth:', error);
     return NextResponse.json(
-      { error: 'Failed to initiate Google Sign-In' },
+      { error: 'Failed to initiate Google Sign-In', details: error.message },
       { status: 500 }
     );
   }

@@ -41,10 +41,14 @@ export default function GoogleCallbackHandler() {
           headers: {
             Authorization: `Bearer ${accessToken}`,
           },
+          // Add timeout to prevent hanging
+          signal: AbortSignal.timeout(10000), // 10 seconds
         });
 
         if (!userInfoResponse.ok) {
-          throw new Error('Failed to fetch user info from Google');
+          const errorText = await userInfoResponse.text();
+          console.error('Google API error:', userInfoResponse.status, errorText);
+          throw new Error(`Failed to fetch user info from Google: ${userInfoResponse.status} ${errorText}`);
         }
 
         const userInfo = await userInfoResponse.json();

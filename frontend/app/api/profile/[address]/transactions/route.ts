@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserProfileFromDB, addTransactionToDB } from '@/lib/db-profile-utils';
 import type { Transaction } from '@/lib/profile-utils';
+import { addressParamSchema, transactionCreateSchema } from '@/lib/validation-schemas';
+import { logger } from '@/lib/logger';
 
 /**
  * GET /api/profile/[address]/transactions
@@ -17,14 +19,19 @@ export async function GET(
     const limit = parseInt(searchParams.get('limit') || '100');
     const offset = parseInt(searchParams.get('offset') || '0');
 
-    if (!address) {
+    // Validate address
+    const validationResult = addressParamSchema.safeParse({ address });
+    if (!validationResult.success) {
+      logger.warn('Invalid address parameter in transactions GET', { address, errors: validationResult.error.issues });
       return NextResponse.json(
-        { error: 'Address is required' },
+        { error: 'Invalid address format', details: validationResult.error.issues },
         { status: 400 }
       );
     }
 
-    const profile = await getUserProfileFromDB(address);
+    const validatedAddress = validationResult.data.address;
+
+    const profile = await getUserProfileFromDB(validatedAddress);
 
     if (!profile) {
       return NextResponse.json(
@@ -49,10 +56,10 @@ export async function GET(
       limit,
       offset,
     });
-  } catch (error: any) {
-    console.error('Error fetching transactions:', error);
+  } catch (error: unknown) {
+    logger.error('Error fetching transactions', error as Error, { address: params.address });
     return NextResponse.json(
-      { error: error.message || 'Failed to fetch transactions' },
+      { error: error instanceof Error ? error.message : 'Failed to fetch transactions' },
       { status: 500 }
     );
   }
@@ -70,26 +77,31 @@ export async function POST(
     const { address } = params;
     const transactionData = await request.json();
 
-    if (!address) {
+    // Validate address
+    const addressValidation = addressParamSchema.safeParse({ address });
+    if (!addressValidation.success) {
+      logger.warn('Invalid address parameter in transactions POST', { address, errors: addressValidation.error.issues });
       return NextResponse.json(
-        { error: 'Address is required' },
+        { error: 'Invalid address format', details: addressValidation.error.issues },
         { status: 400 }
       );
     }
 
-    // Validate required fields
-    const requiredFields = ['type', 'status', 'amount', 'currency', 'description'];
-    for (const field of requiredFields) {
-      if (!transactionData[field]) {
-        return NextResponse.json(
-          { error: `${field} is required` },
-          { status: 400 }
-        );
-      }
+    // Validate transaction data
+    const validationResult = transactionCreateSchema.safeParse(transactionData);
+    if (!validationResult.success) {
+      logger.warn('Invalid transaction data', { errors: validationResult.error.issues });
+      return NextResponse.json(
+        { error: 'Invalid transaction data', details: validationResult.error.issues },
+        { status: 400 }
+      );
     }
 
+    const validatedAddress = addressValidation.data.address;
+    const validatedTransaction = validationResult.data;
+
     // Check if profile exists
-    const profile = await getUserProfileFromDB(address);
+    const profile = await getUserProfileFromDB(validatedAddress);
     if (!profile) {
       return NextResponse.json(
         { error: 'Profile not found. Create profile first.' },
@@ -97,7 +109,7 @@ export async function POST(
       );
     }
 
-    const transaction = await addTransactionToDB(address, transactionData);
+    const transaction = await addTransactionToDB(validatedAddress, validatedTransaction);
 
     if (!transaction) {
       return NextResponse.json(
@@ -107,10 +119,10 @@ export async function POST(
     }
 
     return NextResponse.json(transaction, { status: 201 });
-  } catch (error: any) {
-    console.error('Error adding transaction:', error);
+  } catch (error: unknown) {
+    logger.error('Error adding transaction', error as Error, { address: params.address });
     return NextResponse.json(
-      { error: error.message || 'Failed to add transaction' },
+      { error: error instanceof Error ? error.message : 'Failed to add transaction' },
       { status: 500 }
     );
   }

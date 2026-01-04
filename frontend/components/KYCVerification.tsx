@@ -30,7 +30,7 @@ export default function KYCVerification({ onComplete, onError }: KYCVerification
         setLoading(false);
         return;
       }
-      if (existingKYC?.verificationId && existingKYC.status === 'processing') {
+      if (existingKYC?.verificationId && existingKYC.status === 'pending') {
         setVerificationSessionId(existingKYC.verificationId);
         setStatus('processing');
         setLoading(false);

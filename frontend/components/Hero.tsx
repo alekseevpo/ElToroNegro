@@ -6,7 +6,7 @@ export default function Hero() {
   return (
     <section className="relative overflow-hidden">
       <div className="absolute inset-0 bg-black/80 backdrop-blur-sm"></div>
-      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 lg:py-32">
+      <div className="relative max-w-[98%] mx-auto px-2 sm:px-3 lg:px-4 py-20 lg:py-32">
         <div className="text-center">
           <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold text-accent-yellow mb-6 tracking-tight">
             Invest in Tokenized
@@ -50,13 +50,13 @@ export default function Hero() {
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
             <Link 
               href="/buy-tokens"
-              className="px-8 py-4 bg-accent-yellow text-black text-lg font-medium rounded-lg hover:bg-accent-yellow-light transition-colors"
+              className="px-8 py-4 bg-accent-yellow text-black text-lg font-medium rounded-lg hover:bg-accent-yellow-light transition-colors whitespace-nowrap min-w-[180px] text-center"
             >
               Start Investing
             </Link>
             <a 
               href="#features"
-              className="px-8 py-4 bg-transparent text-accent-yellow text-lg font-medium rounded-lg border-2 border-accent-yellow hover:bg-primary-gray transition-colors"
+              className="px-8 py-4 bg-transparent text-accent-yellow text-lg font-medium rounded-lg border-2 border-accent-yellow hover:bg-primary-gray transition-colors whitespace-nowrap min-w-[180px] text-center"
             >
               Learn More
             </a>

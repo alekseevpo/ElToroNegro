@@ -86,7 +86,7 @@ function Features() {
     <section id="features" className="relative py-20">
       <div className="absolute inset-0 bg-black/85 backdrop-blur-sm"></div>
       <div className="relative">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="max-w-[98%] mx-auto px-2 sm:px-3 lg:px-4">
         <div className="text-center mb-16">
           <h2 className="text-4xl md:text-5xl font-bold text-accent-yellow mb-4">
             Why Choose Us

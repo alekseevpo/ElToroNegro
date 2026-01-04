@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { ethers } from 'ethers';
+import { BrowserProvider, formatEther } from 'ethers';
 import {
   createAuthMessage,
   requestSignature,
@@ -50,7 +50,7 @@ interface AuthProviderProps {
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [provider, setProvider] = useState<ethers.BrowserProvider | null>(null);
+  const [provider, setProvider] = useState<BrowserProvider | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
 
   // Проверить сохраненное соединение при загрузке
@@ -74,7 +74,36 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const checkSavedConnection = async () => {
     try {
-      // Check for Google session first
+      // Check for email/password session first
+      if (typeof window !== 'undefined') {
+        const authSessionStr = sessionStorage.getItem('auth_session');
+        if (authSessionStr) {
+          try {
+            const authSession = JSON.parse(authSessionStr);
+            if (authSession.expiresAt > Date.now()) {
+              // Valid email session
+              setUser({
+                address: authSession.address,
+                balance: '0',
+                isConnected: true,
+                authType: authSession.authType || 'email',
+                name: authSession.name,
+                email: authSession.email,
+              });
+              setLoading(false);
+              return;
+            } else {
+              // Expired session
+              sessionStorage.removeItem('auth_session');
+            }
+          } catch (error) {
+            logger.error('Error parsing auth session', error);
+            sessionStorage.removeItem('auth_session');
+          }
+        }
+      }
+
+      // Check for Google session
       if (typeof window !== 'undefined') {
         const googleSessionStr = sessionStorage.getItem('google_session');
         if (googleSessionStr) {
@@ -110,7 +139,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         const isValid = await validateSession(storedSession);
         if (isValid && typeof window !== 'undefined' && (window as any).ethereum) {
           const ethereum = (window as any).ethereum;
-          const provider = new ethers.BrowserProvider(ethereum);
+          const provider = new BrowserProvider(ethereum);
           const accounts = await provider.listAccounts();
           
           // Verify the address matches the stored session
@@ -118,7 +147,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
               accounts[0].address.toLowerCase() === storedSession.address.toLowerCase()) {
             // Reconnect using existing session (no new signature needed)
             const balance = await provider.getBalance(storedSession.address);
-            const balanceInEth = ethers.formatEther(balance);
+            const balanceInEth = formatEther(balance);
             
             setUser({
               address: storedSession.address,
@@ -174,13 +203,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
 
   const connectWallet = async (
-    provider: ethers.BrowserProvider, 
+    provider: BrowserProvider, 
     address: string,
     requireSignature: boolean = true
   ) => {
     try {
       const balance = await provider.getBalance(address);
-      const balanceInEth = ethers.formatEther(balance);
+      const balanceInEth = formatEther(balance);
 
       // If signature is required, create auth message and request signature
       if (requireSignature) {
@@ -203,7 +232,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setProvider(provider);
     } catch (error) {
       const { message } = handleError(error);
-      logger.error('Error connecting wallet', error, { walletType });
+      logger.error('Error connecting wallet', error);
       throw new Error(message || 'Failed to connect wallet');
       throw error;
     }
@@ -241,9 +270,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
               if (existingAccounts && existingAccounts.length > 0 &&
                   existingAccounts[0].toLowerCase() === storedSession.address.toLowerCase()) {
                 // Valid session exists, reconnect without new signature
-                const provider = new ethers.BrowserProvider(ethereum);
+                const provider = new BrowserProvider(ethereum);
                 const balance = await provider.getBalance(storedSession.address);
-                const balanceInEth = ethers.formatEther(balance);
+                const balanceInEth = formatEther(balance);
                 
                 setUser({
                   address: storedSession.address,
@@ -273,7 +302,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             throw new Error('No accounts found. Please unlock your wallet and try again.');
           }
           
-          const provider = new ethers.BrowserProvider(ethereum);
+          const provider = new BrowserProvider(ethereum);
           await connectWallet(provider, accounts[0]);
         } catch (requestError: any) {
           // Обработать специфичные ошибки
@@ -336,7 +365,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
     try {
       const balance = await provider.getBalance(user.address);
-      const balanceInEth = ethers.formatEther(balance);
+      const balanceInEth = formatEther(balance);
 
       setUser({
         ...user,

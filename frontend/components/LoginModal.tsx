@@ -8,22 +8,26 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useTonConnectUI, useTonAddress } from '@tonconnect/ui-react';
 import TonConnectButtonWrapper from './TonConnectButton';
 import { logger } from '@/lib/logger';
+import { hashPasswordForStorage } from '@/lib/password-utils';
 
 interface LoginModalProps {
   isOpen: boolean;
   onClose: () => void;
+  mode?: 'login' | 'signup'; // 'login' for existing users, 'signup' for new users
 }
 
-export default function LoginModal({ isOpen, onClose }: LoginModalProps) {
+export default function LoginModal({ isOpen, onClose, mode = 'login' }: LoginModalProps) {
   const { connect, onTonConnect } = useAuth();
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [step, setStep] = useState<'email' | 'password'>('email');
   const [savedEmail, setSavedEmail] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [isSignUp, setIsSignUp] = useState(mode === 'signup');
 
   const [tonConnectUI] = useTonConnectUI();
   const tonUserAddress = useTonAddress();
@@ -39,15 +43,17 @@ export default function LoginModal({ isOpen, onClose }: LoginModalProps) {
       setError(null);
       setEmail('');
       setPassword('');
+      setConfirmPassword('');
       setStep('email');
       setSavedEmail('');
+      setIsSignUp(mode === 'signup');
     } else {
       document.body.style.overflow = 'unset';
     }
     return () => {
       document.body.style.overflow = 'unset';
     };
-  }, [isOpen]);
+  }, [isOpen, mode]);
 
   // Listen for TON connection
   useEffect(() => {
@@ -60,12 +66,13 @@ export default function LoginModal({ isOpen, onClose }: LoginModalProps) {
         onTonConnect(tonUserAddress);
       }
       
-      // Close modal after successful connection
+      // Close modal and redirect to dashboard after successful connection
       setTimeout(() => {
         onClose();
+        router.push('/dashboard');
       }, 500);
     }
-  }, [tonUserAddress, isOpen, onTonConnect, onClose]);
+  }, [tonUserAddress, isOpen, onTonConnect, onClose, router]);
 
   const handleGoogleSignIn = async () => {
     setError(null);
@@ -104,33 +111,98 @@ export default function LoginModal({ isOpen, onClose }: LoginModalProps) {
       return;
     }
 
+    // For signup, check password confirmation
+    if (isSignUp) {
+      if (password !== confirmPassword) {
+        setError('Passwords do not match');
+        return;
+      }
+    }
+
     setError(null);
     setIsLoading(true);
 
-    // TODO: Replace with actual authentication API call
-    // For now, simulate authentication
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // TODO: Call actual authentication endpoint
-      // const response = await fetch('/api/auth/login', {
-      //   method: 'POST',
-      //   headers: { 'Content-Type': 'application/json' },
-      //   body: JSON.stringify({ email: savedEmail, password }),
-      // });
-      // const data = await response.json();
-      // if (!response.ok) throw new Error(data.error);
+      if (isSignUp) {
+        // Registration flow
+        const response = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            email: savedEmail, 
+            password,
+            name: savedEmail.split('@')[0], // Use email prefix as default name
+          }),
+        });
 
-      // For demo purposes, accept any password (replace with actual validation)
-      // In production, validate password against backend
-      logger.debug('Authenticating user', { email: savedEmail });
-      
-      // After successful authentication, redirect to dashboard
-      onClose();
-      router.push('/dashboard');
+        const data = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(data.error || 'Failed to register');
+        }
+
+        logger.info('User registered successfully', { email: savedEmail });
+        
+        // After registration, automatically log in
+        const loginResponse = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: savedEmail, password }),
+        });
+
+        const loginData = await loginResponse.json();
+        
+        if (!loginResponse.ok) {
+          throw new Error(loginData.error || 'Registration successful, but login failed');
+        }
+
+        // Store session data
+        if (typeof window !== 'undefined') {
+          const sessionData = {
+            address: loginData.address,
+            email: loginData.email,
+            name: loginData.name,
+            authType: 'email',
+            expiresAt: Date.now() + (7 * 24 * 60 * 60 * 1000), // 7 days
+          };
+          sessionStorage.setItem('auth_session', JSON.stringify(sessionData));
+          
+          // Trigger page reload to update auth state
+          window.location.href = '/dashboard';
+          return;
+        }
+      } else {
+        // Login flow
+        const response = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: savedEmail, password }),
+        });
+
+        const data = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(data.error || 'Invalid email or password');
+        }
+
+        // Store session data
+        if (typeof window !== 'undefined') {
+          const sessionData = {
+            address: data.address,
+            email: data.email,
+            name: data.name,
+            authType: 'email',
+            expiresAt: Date.now() + (7 * 24 * 60 * 60 * 1000), // 7 days
+          };
+          sessionStorage.setItem('auth_session', JSON.stringify(sessionData));
+          
+          // Trigger page reload to update auth state
+          window.location.href = '/dashboard';
+          return;
+        }
+      }
     } catch (err: any) {
-      setError(err.message || 'Invalid email or password');
+      setError(err.message || (isSignUp ? 'Failed to register' : 'Invalid email or password'));
       setIsLoading(false);
     }
   };
@@ -138,10 +210,11 @@ export default function LoginModal({ isOpen, onClose }: LoginModalProps) {
   const handleBackToEmail = () => {
     setStep('email');
     setPassword('');
+    setConfirmPassword('');
     setError(null);
   };
 
-  const handleWalletConnect = async (walletType: 'metamask' | 'ton' = 'metamask') => {
+  const handleWalletConnect = async (walletType: 'metamask' | 'ton' | 'coinbase' = 'metamask') => {
     setError(null);
     setIsLoading(true);
 
@@ -157,9 +230,10 @@ export default function LoginModal({ isOpen, onClose }: LoginModalProps) {
         // Connect MetaMask wallet
         await connect('metamask');
         
-        // Close modal after successful connection
+        // Close modal and redirect to dashboard after successful connection
         setTimeout(() => {
           onClose();
+          router.push('/dashboard');
         }, 300);
       } else if (walletType === 'ton') {
         // Open TON Connect modal
@@ -171,6 +245,32 @@ export default function LoginModal({ isOpen, onClose }: LoginModalProps) {
           setError(err.message || 'Failed to open TON Connect modal. Please make sure you have a TON wallet installed.');
           setIsLoading(false);
         }
+      } else if (walletType === 'coinbase') {
+        // Coinbase Wallet connection (works through window.ethereum)
+        if (typeof window === 'undefined' || !(window as any).ethereum) {
+          setError('No Ethereum wallet detected. Please install Coinbase Wallet or MetaMask.');
+          setIsLoading(false);
+          return;
+        }
+
+        const ethereum = (window as any).ethereum;
+        
+        // Check if Coinbase Wallet is available (it sets isCoinbaseWallet flag)
+        // Coinbase Wallet also works through window.ethereum, so we can use the same connect method
+        // But we can detect it by checking ethereum.isCoinbaseWallet
+        if (ethereum.isCoinbaseWallet || ethereum.providers?.some((p: any) => p.isCoinbaseWallet)) {
+          // Connect through Coinbase Wallet
+          await connect('metamask'); // Use same method as MetaMask since they both use window.ethereum
+        } else {
+          // Try to connect anyway - might work if Coinbase Wallet is the default provider
+          await connect('metamask');
+        }
+        
+        // Close modal and redirect to dashboard after successful connection
+        setTimeout(() => {
+          onClose();
+          router.push('/dashboard');
+        }, 300);
       }
     } catch (err: any) {
       // Handle specific error cases
@@ -223,7 +323,7 @@ export default function LoginModal({ isOpen, onClose }: LoginModalProps) {
 
         {/* Title */}
         <h2 className="text-2xl font-bold text-white mb-6">
-          Welcome to El Toro Negro
+          {isSignUp ? 'Create Account' : 'Welcome to El Toro Negro'}
         </h2>
 
         {/* Google Sign-In Button - Only show on email step */}
@@ -297,7 +397,7 @@ export default function LoginModal({ isOpen, onClose }: LoginModalProps) {
           <div className="mb-4">
             <div className="flex items-center justify-between mb-2">
               <label htmlFor="password" className="block text-sm font-medium text-primary-gray-lighter">
-                Password
+                {isSignUp ? 'Create Password' : 'Password'}
               </label>
               <button
                 onClick={handleBackToEmail}
@@ -308,26 +408,41 @@ export default function LoginModal({ isOpen, onClose }: LoginModalProps) {
             </div>
             <div className="mb-2">
               <p className="text-xs text-primary-gray-lighter">
-                Signing in as: <span className="text-white">{savedEmail}</span>
+                {isSignUp ? 'Creating account for' : 'Signing in as'}: <span className="text-white">{savedEmail}</span>
               </p>
             </div>
-            <div className="flex gap-2">
+            <div className="space-y-3">
               <input
                 id="password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handlePasswordSubmit()}
-                placeholder="Enter your password"
-                className="flex-1 px-4 py-2 bg-black border border-primary-gray-light rounded-lg text-white placeholder-gray-500 focus:ring-2 focus:ring-accent-yellow focus:border-accent-yellow outline-none"
-                autoComplete="current-password"
+                onKeyPress={(e) => e.key === 'Enter' && !isSignUp && handlePasswordSubmit()}
+                placeholder={isSignUp ? 'Create a password (min 6 characters)' : 'Enter your password'}
+                className="w-full px-4 py-2 bg-black border border-primary-gray-light rounded-lg text-white placeholder-gray-500 focus:ring-2 focus:ring-accent-yellow focus:border-accent-yellow outline-none"
+                autoComplete={isSignUp ? 'new-password' : 'current-password'}
               />
+              {isSignUp && (
+                <input
+                  id="confirmPassword"
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handlePasswordSubmit()}
+                  placeholder="Confirm your password"
+                  className="w-full px-4 py-2 bg-black border border-primary-gray-light rounded-lg text-white placeholder-gray-500 focus:ring-2 focus:ring-accent-yellow focus:border-accent-yellow outline-none"
+                  autoComplete="new-password"
+                />
+              )}
               <button
                 onClick={handlePasswordSubmit}
-                disabled={isLoading || !password}
-                className="px-6 py-2 bg-accent-yellow hover:bg-accent-yellow-dark text-black font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={isLoading || !password || (isSignUp && !confirmPassword)}
+                className="w-full px-6 py-2 bg-accent-yellow hover:bg-accent-yellow-dark text-black font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {isLoading ? 'Signing in...' : 'Sign In'}
+                {isLoading 
+                  ? (isSignUp ? 'Creating account...' : 'Signing in...') 
+                  : (isSignUp ? 'Create Account' : 'Sign In')
+                }
               </button>
             </div>
           </div>
@@ -335,41 +450,47 @@ export default function LoginModal({ isOpen, onClose }: LoginModalProps) {
 
         {/* Wallet Options - Only show on email step */}
         {step === 'email' && (
-          <div className="flex items-center justify-center gap-6 mb-6">
+          <div className="flex items-center justify-center gap-4 mb-6 flex-wrap">
           {/* MetaMask */}
           <button
             onClick={() => handleWalletConnect('metamask')}
             disabled={isLoading}
-            className="flex items-center justify-center w-16 h-16 rounded-lg transition-all hover:scale-110 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+            className="flex flex-col items-center justify-center gap-2 p-3 rounded-lg border border-primary-gray-light hover:border-accent-yellow transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
             title="Connect MetaMask"
           >
-            <img 
-              src="/metamask-icon.svg"
-              alt="MetaMask"
-              className="w-full h-full object-contain"
-              onError={(e) => {
-                const target = e.target as HTMLImageElement;
-                target.style.display = 'none';
-              }}
-            />
+            <div className="w-12 h-12 flex items-center justify-center bg-[#F6851B] rounded-lg">
+              <span className="text-white font-bold text-xs">MM</span>
+            </div>
+            <span className="text-xs text-primary-gray-lighter">MetaMask</span>
           </button>
 
-          {/* Telegram/TON Wallet */}
+          {/* TON Wallet */}
           <button
             onClick={() => handleWalletConnect('ton')}
             disabled={isLoading}
-            className="flex items-center justify-center w-16 h-16 rounded-lg transition-all hover:scale-110 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
-            title="Connect via Telegram"
+            className="flex flex-col items-center justify-center gap-2 p-3 rounded-lg border border-primary-gray-light hover:border-accent-yellow transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+            title="Connect TON Wallet"
           >
-            <img 
-              src="/telegram-icon.png"
-              alt="Telegram"
-              className="w-full h-full object-contain"
-              onError={(e) => {
-                const target = e.target as HTMLImageElement;
-                target.style.display = 'none';
-              }}
-            />
+            <div className="w-12 h-12 flex items-center justify-center bg-[#0088CC] rounded-lg">
+              <span className="text-white font-bold text-xs">TON</span>
+            </div>
+            <span className="text-xs text-primary-gray-lighter">TON Wallet</span>
+          </button>
+
+          {/* Coinbase Wallet */}
+          <button
+            onClick={() => handleWalletConnect('coinbase')}
+            disabled={isLoading}
+            className="flex flex-col items-center justify-center gap-2 p-3 rounded-lg border border-primary-gray-light hover:border-accent-yellow transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+            title="Connect Coinbase Wallet"
+          >
+            <div className="w-12 h-12 flex items-center justify-center bg-[#0052FF] rounded-lg">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 7C9.24 7 7 9.24 7 12C7 14.76 9.24 17 12 17C14.76 17 17 14.76 17 12C17 9.24 14.76 7 12 7ZM12 15.5C10.07 15.5 8.5 13.93 8.5 12C8.5 10.07 10.07 8.5 12 8.5C13.93 8.5 15.5 10.07 15.5 12C15.5 13.93 13.93 15.5 12 15.5Z" fill="white"/>
+                <rect x="10" y="10" width="4" height="4" rx="1" fill="white"/>
+              </svg>
+            </div>
+            <span className="text-xs text-primary-gray-lighter">Coinbase</span>
           </button>
         </div>
         )}

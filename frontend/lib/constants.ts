@@ -36,6 +36,28 @@ export const MIN_INVESTMENT_AMOUNT = 10; // EUR
 export const MAX_INVESTMENT_AMOUNT = 100000; // EUR
 export const TOKEN_PRICE = 1; // 1 $TAI = 1 EUR
 
+// Lottery Configuration
+export const LOTTERY_TICKET_PRICE = 10; // USDT or EUR
+export const LOTTERY_FREE_TICKET_PER_INVESTMENT = 10; // 1 free ticket per 10 EUR invested
+// Lottery prizes with probabilities that sum to exactly 100%
+// Expected value: 6.12 USDT (61.17% return, 38.83% profit margin)
+export const LOTTERY_PRIZES = [
+  { amount: 1000, probability: 0.09 }, // 0.09% - ~1 из 1111
+  { amount: 500, probability: 0.09 },  // 0.09% - ~1 из 1111
+  { amount: 100, probability: 0.18 },  // 0.18% - ~1 из 556
+  { amount: 50, probability: 0.93 },   // 0.93% - ~1 из 108
+  { amount: 30, probability: 1.39 },   // 1.39% - ~1 из 72
+  { amount: 20, probability: 1.85 },   // 1.85% - ~1 из 54
+  { amount: 15, probability: 2.78 },   // 2.78% - ~1 из 36
+  { amount: 10, probability: 4.63 },   // 4.63% - ~1 из 22
+  { amount: 7, probability: 4.63 },    // 4.63% - ~1 из 22
+  { amount: 5, probability: 9.26 },    // 9.26% - ~1 из 11
+  { amount: 4, probability: 9.26 },    // 9.26% - ~1 из 11
+  { amount: 3, probability: 18.52 },   // 18.52% - ~1 из 5.4
+  { amount: 2, probability: 27.78 },   // 27.78% - ~1 из 3.6
+  { amount: 1, probability: 18.61 },   // 18.61% - ~1 из 5.37 (adjusted to sum to 100%)
+] as const;
+
 // KYC Limits
 export const KYC_REQUIRED_AMOUNT = 1000; // EUR
 

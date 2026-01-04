@@ -1,11 +1,11 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { ethers } from 'ethers';
+import { BrowserProvider } from 'ethers';
 
 export const useWallet = () => {
   const [account, setAccount] = useState<string | null>(null);
-  const [provider, setProvider] = useState<ethers.BrowserProvider | null>(null);
+  const [provider, setProvider] = useState<BrowserProvider | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,7 +34,7 @@ export const useWallet = () => {
 
     try {
       const ethereum = (window as any).ethereum;
-      const provider = new ethers.BrowserProvider(ethereum);
+      const provider = new BrowserProvider(ethereum);
       const accounts = await provider.listAccounts();
 
       if (accounts.length > 0) {
@@ -53,7 +53,7 @@ export const useWallet = () => {
     } else {
       setAccount(accounts[0]);
       if (typeof window !== 'undefined' && (window as any).ethereum) {
-        setProvider(new ethers.BrowserProvider((window as any).ethereum));
+        setProvider(new BrowserProvider((window as any).ethereum));
       }
     }
   };
@@ -73,7 +73,7 @@ export const useWallet = () => {
 
     try {
       const ethereum = (window as any).ethereum;
-      const provider = new ethers.BrowserProvider(ethereum);
+      const provider = new BrowserProvider(ethereum);
       
       await provider.send('eth_requestAccounts', []);
       const signer = await provider.getSigner();

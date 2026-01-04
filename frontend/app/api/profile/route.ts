@@ -5,6 +5,8 @@ import {
   getUserProfileFromDB,
 } from '@/lib/db-profile-utils';
 import type { UserProfile } from '@/lib/profile-utils';
+import { profileCreateSchema, profileUpdateSchema } from '@/lib/validation-schemas';
+import { logger } from '@/lib/logger';
 
 /**
  * POST /api/profile
@@ -13,14 +15,18 @@ import type { UserProfile } from '@/lib/profile-utils';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { address, username, referredBy, ...updates } = body;
-
-    if (!address) {
+    
+    // Validate request body
+    const validationResult = profileCreateSchema.safeParse(body);
+    if (!validationResult.success) {
+      logger.warn('Invalid profile creation request', { errors: validationResult.error.issues });
       return NextResponse.json(
-        { error: 'Address is required' },
+        { error: 'Invalid request data', details: validationResult.error.issues },
         { status: 400 }
       );
     }
+
+    const { address, username, referredBy, ...updates } = validationResult.data;
 
     // Check if profile exists
     const existingProfile = await getUserProfileFromDB(address);
@@ -83,10 +89,10 @@ export async function POST(request: NextRequest) {
 
       return NextResponse.json(newProfile, { status: 201 });
     }
-  } catch (error: any) {
-    console.error('Error creating/updating profile:', error);
+  } catch (error: unknown) {
+    logger.error('Error creating/updating profile', error as Error);
     return NextResponse.json(
-      { error: error.message || 'Failed to create/update profile' },
+      { error: error instanceof Error ? error.message : 'Failed to create/update profile' },
       { status: 500 }
     );
   }
@@ -99,14 +105,18 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { address, ...updates } = body;
-
-    if (!address) {
+    
+    // Validate request body
+    const validationResult = profileUpdateSchema.safeParse(body);
+    if (!validationResult.success) {
+      logger.warn('Invalid profile update request', { errors: validationResult.error.issues });
       return NextResponse.json(
-        { error: 'Address is required' },
+        { error: 'Invalid request data', details: validationResult.error.issues },
         { status: 400 }
       );
     }
+
+    const { address, ...updates } = validationResult.data;
 
     const existingProfile = await getUserProfileFromDB(address);
 
@@ -117,8 +127,8 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    // Prevent changing username, referralCode, createdAt
-    const { username, referralCode, createdAt, ...allowedUpdates } = updates;
+    // Prevent changing username, referralCode, createdAt (these fields are not in update schema, but we ensure they're not changed)
+    const allowedUpdates = updates;
 
     const updatedProfile: UserProfile = {
       ...existingProfile,
@@ -135,10 +145,10 @@ export async function PUT(request: NextRequest) {
     }
 
     return NextResponse.json(saved);
-  } catch (error: any) {
-    console.error('Error updating profile:', error);
+  } catch (error: unknown) {
+    logger.error('Error updating profile', error as Error);
     return NextResponse.json(
-      { error: error.message || 'Failed to update profile' },
+      { error: error instanceof Error ? error.message : 'Failed to update profile' },
       { status: 500 }
     );
   }

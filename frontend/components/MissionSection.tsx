@@ -5,7 +5,7 @@ export default function MissionSection() {
     <section className="relative py-20">
       <div className="absolute inset-0 bg-black/90 backdrop-blur-sm"></div>
       <div className="relative">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="max-w-[98%] mx-auto px-2 sm:px-3 lg:px-4">
         {/* Hero Header */}
         <div className="text-center mb-20">
           <div className="inline-block mb-6">

@@ -1,12 +1,14 @@
+'use client';
+
 import Header from '@/components/Header';
-import LotterySection from '@/components/LotterySection';
+import InstantLottery from '@/components/InstantLottery';
 import Footer from '@/components/Footer';
 
 export default function LotteryPage() {
   return (
     <main className="min-h-screen bg-white">
       <Header />
-      <LotterySection />
+      <InstantLottery />
       <Footer />
     </main>
   );

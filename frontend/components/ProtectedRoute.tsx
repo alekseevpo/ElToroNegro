@@ -1,9 +1,14 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
-import LoginModal from './LoginModal';
+
+// Lazy load LoginModal - only load when needed
+const LoginModal = dynamic(() => import('./LoginModal'), {
+  ssr: false,
+});
 
 interface ProtectedRouteProps {
   children: React.ReactNode;

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { ethers } from 'ethers';
+import { Contract, parseEther, formatEther } from 'ethers';
 import { getInvestmentPoolContract, getSigner } from '@/lib/contracts';
 
 interface PoolStats {
@@ -29,7 +29,7 @@ interface UserStats {
 }
 
 export const useInvestmentPool = (contractAddress?: string) => {
-  const [contract, setContract] = useState<ethers.Contract | null>(null);
+  const [contract, setContract] = useState<Contract | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [poolStats, setPoolStats] = useState<PoolStats | null>(null);
@@ -59,7 +59,7 @@ export const useInvestmentPool = (contractAddress?: string) => {
         try {
           // Загрузить начальные данные
           const min = await poolContract.MIN_INVESTMENT();
-          setMinInvestment(ethers.formatEther(min));
+          setMinInvestment(formatEther(min));
 
           const period = await poolContract.INVESTMENT_PERIOD();
           setInvestmentPeriod(Number(period));
@@ -80,14 +80,14 @@ export const useInvestmentPool = (contractAddress?: string) => {
     initContract();
   }, [contractAddress]);
 
-  const loadPoolStats = useCallback(async (poolContract: ethers.Contract) => {
+  const loadPoolStats = useCallback(async (poolContract: Contract) => {
     try {
       const stats = await poolContract.getPoolStats();
       setPoolStats({
-        totalInvested: ethers.formatEther(stats._totalInvested),
-        totalWithdrawn: ethers.formatEther(stats._totalWithdrawn),
+        totalInvested: formatEther(stats._totalInvested),
+        totalWithdrawn: formatEther(stats._totalWithdrawn),
         totalActiveInvestments: Number(stats._totalActiveInvestments),
-        currentBalance: ethers.formatEther(stats._currentBalance),
+        currentBalance: formatEther(stats._currentBalance),
         interestRate: Number(stats._interestRate) / 100, // Конвертируем basis points в проценты
         platformFeePercent: Number(stats._platformFeePercent) / 100,
       });
@@ -104,7 +104,7 @@ export const useInvestmentPool = (contractAddress?: string) => {
     try {
       setLoading(true);
       const tx = await contract.invest({
-        value: ethers.parseEther(amount),
+        value: parseEther(amount),
       });
       await tx.wait();
 
@@ -177,11 +177,11 @@ export const useInvestmentPool = (contractAddress?: string) => {
       for (let i = 0; i < totalCount; i++) {
         const investment = await contract.getInvestment(userAddress, i);
         investments.push({
-          amount: ethers.formatEther(investment.amount),
+          amount: formatEther(investment.amount),
           depositTime: Number(investment.depositTime),
           withdrawTime: Number(investment.withdrawTime),
           withdrawn: investment.withdrawn,
-          estimatedReturn: ethers.formatEther(investment.estimatedReturn),
+          estimatedReturn: formatEther(investment.estimatedReturn),
         });
       }
 
@@ -202,8 +202,8 @@ export const useInvestmentPool = (contractAddress?: string) => {
       return {
         totalCount: Number(stats.totalCount),
         activeCount: Number(stats.activeCount),
-        totalInvestedAmount: ethers.formatEther(stats.totalInvestedAmount),
-        totalAvailableToWithdraw: ethers.formatEther(stats.totalAvailableToWithdraw),
+        totalInvestedAmount: formatEther(stats.totalInvestedAmount),
+        totalAvailableToWithdraw: formatEther(stats.totalAvailableToWithdraw),
       };
     } catch (err: any) {
       console.error('Error getting user stats:', err);

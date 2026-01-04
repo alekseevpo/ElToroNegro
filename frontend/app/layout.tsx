@@ -11,6 +11,11 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 export const metadata: Metadata = {
   title: 'El Toro Negro - Invest in Tokenized Assets',
   description: 'Invest from 10 EUR and earn returns. Trade tokenized stocks, gold, oil, and other assets.',
+  icons: {
+    icon: '/logo.png',
+    shortcut: '/logo.png',
+    apple: '/logo.png',
+  },
 };
 
 export default function RootLayout({

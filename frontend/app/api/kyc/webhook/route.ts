@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import type Stripe from 'stripe';
 
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET || '';
 
@@ -26,7 +27,7 @@ export async function POST(request: NextRequest) {
   }
 
   const stripe = new Stripe(stripeSecretKey, {
-    apiVersion: '2024-12-18.acacia',
+    apiVersion: '2025-12-15.clover',
   });
 
   const body = await request.text();
@@ -36,7 +37,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'No signature' }, { status: 400 });
   }
 
-  let event: Stripe.Event;
+  let event: Stripe.Event | null = null;
 
   try {
     event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
@@ -50,7 +51,7 @@ export async function POST(request: NextRequest) {
 
   // Handle verification session events
   if (event.type === 'identity.verification_session.verified') {
-    const session = event.data.object as Stripe.Identity.VerificationSession;
+    const session = event.data.object as { id: string; metadata?: { userId?: string } };
     const userId = session.metadata?.userId;
 
     if (userId) {
@@ -70,7 +71,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (event.type === 'identity.verification_session.requires_input') {
-    const session = event.data.object as Stripe.Identity.VerificationSession;
+    const session = event.data.object as { id: string; metadata?: { userId?: string } };
     const userId = session.metadata?.userId;
     
     if (userId) {
@@ -90,7 +91,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (event.type === 'identity.verification_session.canceled') {
-    const session = event.data.object as Stripe.Identity.VerificationSession;
+    const session = event.data.object as { id: string; metadata?: { userId?: string } };
     const userId = session.metadata?.userId;
     
     if (userId) {
@@ -110,7 +111,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (event.type === 'identity.verification_session.processing') {
-    const session = event.data.object as Stripe.Identity.VerificationSession;
+    const session = event.data.object as { id: string; metadata?: { userId?: string } };
     const userId = session.metadata?.userId;
     
     if (userId) {
@@ -129,8 +130,8 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  if (event.type === 'identity.verification_session.verification_failed') {
-    const session = event.data.object as Stripe.Identity.VerificationSession;
+  if (event.type === 'identity.verification_session.verified' && (event.data.object as any).status === 'failed') {
+    const session = event.data.object as { id: string; metadata?: { userId?: string } };
     const userId = session.metadata?.userId;
     
     if (userId) {

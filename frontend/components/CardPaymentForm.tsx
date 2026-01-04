@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { loadStripe, StripeElementsOptions } from '@stripe/stripe-js';
 import {
   Elements,
@@ -13,9 +13,30 @@ import { useToast } from '@/hooks/useToast';
 import { logger } from '@/lib/logger';
 import { handleError } from '@/lib/error-handler';
 
-const stripePromise = loadStripe(
-  process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || ''
-);
+// Only load Stripe if publishable key is configured
+// Wrap in try-catch to prevent module-level errors
+let stripePromise: Promise<any> | null = null;
+const stripePublishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
+
+if (stripePublishableKey && stripePublishableKey.trim() !== '') {
+  try {
+    stripePromise = loadStripe(stripePublishableKey).catch((error) => {
+      // Use console.error at module level to avoid SSR issues
+      if (typeof window !== 'undefined') {
+        console.error('Failed to load Stripe.js', error);
+      }
+      return null;
+    });
+  } catch (error) {
+    // Use console.error at module level to avoid SSR issues
+    if (typeof window !== 'undefined') {
+      console.error('Error initializing Stripe', error);
+    }
+    stripePromise = Promise.resolve(null);
+  }
+} else {
+  stripePromise = Promise.resolve(null);
+}
 
 interface CardPaymentFormProps {
   amount: number;
@@ -40,10 +61,33 @@ function PaymentForm({
   const [loading, setLoading] = useState(false);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [paymentStep, setPaymentStep] = useState<PaymentStep>('preparing');
+  const [isMounted, setIsMounted] = useState(false);
+  const [cardElementReady, setCardElementReady] = useState(false);
+  const cardElementRef = useRef<any>(null);
+  
+  // Track if component is mounted
+  useEffect(() => {
+    setIsMounted(true);
+    return () => setIsMounted(false);
+  }, []);
 
   // Create payment intent when component mounts or amount changes
   useEffect(() => {
-    if (!user?.address || !amount || amount < 10) return;
+    // Reset card element ready state when amount changes
+    setCardElementReady(false);
+    cardElementRef.current = null;
+    
+    if (!user?.address || !amount || amount < 10) {
+      if (amount && amount < 10) {
+        onError('Minimum amount is €10');
+      }
+      return;
+    }
+
+    if (!stripe) {
+      logger.warn('Stripe not loaded yet', { amount });
+      return;
+    }
 
     const createPaymentIntent = async () => {
       setPaymentStep('preparing');
@@ -60,35 +104,110 @@ function PaymentForm({
         });
 
         if (!response.ok) {
-          const data = await response.json();
-          throw new Error(data.error || 'Failed to create payment intent');
+          let errorMessage = 'Failed to create payment intent';
+          try {
+            const data = await response.json();
+            errorMessage = data.error || errorMessage;
+            logger.error('Payment intent creation failed', new Error(errorMessage), { 
+              status: response.status,
+              statusText: response.statusText,
+              amount,
+              userId: user.address 
+            });
+          } catch (parseError) {
+            logger.error('Failed to parse error response', parseError as Error, { 
+              status: response.status,
+              statusText: response.statusText 
+            });
+            errorMessage = `Server error (${response.status}): ${response.statusText || 'Unknown error'}`;
+          }
+          throw new Error(errorMessage);
         }
 
         const data = await response.json();
+        if (!data.clientSecret) {
+          throw new Error('No client secret received from server');
+        }
+        
         setClientSecret(data.clientSecret);
         setPaymentStep('ready');
+        logger.info('Payment intent created successfully', { amount, paymentIntentId: data.paymentIntentId });
       } catch (err: unknown) {
         const { message } = handleError(err);
-        logger.error('Error creating payment intent', err, { amount, currency });
+        const currentAmount = amount;
+        const currentUserId = user?.address;
+        logger.error('Error creating payment intent', err, { 
+          amount: currentAmount, 
+          currency: 'eur', 
+          userId: currentUserId 
+        });
         setPaymentStep('error');
-        onError(message || 'Failed to initialize payment');
+        onError(message || 'Failed to initialize payment. Please try again.');
       }
     };
 
     createPaymentIntent();
-  }, [amount, user?.address, metadata, onError]);
+  }, [amount, user?.address, metadata, onError, stripe]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!stripe || !elements || !clientSecret) {
-      onError('Stripe is not loaded. Please refresh the page.');
+    if (!stripe) {
+      logger.error('Stripe not loaded', new Error('Stripe instance is null'));
+      onError('Stripe is not loaded. Please refresh the page and try again.');
       return;
     }
 
-    const cardElement = elements.getElement(CardElement);
+    if (!elements) {
+      logger.error('Stripe Elements not loaded', new Error('Elements instance is null'));
+      onError('Payment form is not ready. Please refresh the page and try again.');
+      return;
+    }
+
+    if (!clientSecret) {
+      logger.error('Client secret missing', new Error('Client secret is null'));
+      onError('Payment session expired. Please refresh the page and try again.');
+      return;
+    }
+
+    // Wait a bit to ensure CardElement is fully mounted and ready
+    let attempts = 0;
+    let cardElement = null;
+    
+    while (attempts < 10 && !cardElement) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      if (!isMounted) {
+        logger.warn('Component unmounted before payment', { amount });
+        onError('Payment form was closed. Please try again.');
+        return;
+      }
+      
+      cardElement = elements.getElement(CardElement);
+      attempts++;
+    }
+    
     if (!cardElement) {
-      onError('Card element not found');
+      logger.error('Card element not found after retries', new Error('CardElement is null'), { 
+        isMounted,
+        hasElements: !!elements,
+        hasStripe: !!stripe,
+        cardElementReady,
+        attempts
+      });
+      onError('Card element is not ready. Please wait a moment and try again.');
+      return;
+    }
+    
+    // Double check that element is still mounted
+    try {
+      // Try to access element's internal state to verify it's mounted
+      if (cardElementRef.current && !cardElementRef.current._element) {
+        throw new Error('CardElement is not properly mounted');
+      }
+    } catch (checkError) {
+      logger.error('CardElement mount check failed', checkError as Error);
+      onError('Card element is not ready. Please refresh the page and try again.');
       return;
     }
 
@@ -96,23 +215,49 @@ function PaymentForm({
     setPaymentStep('processing');
 
     try {
-      // Confirm payment
-      const { error, paymentIntent } = await stripe.confirmCardPayment(
-        clientSecret,
-        {
-          payment_method: {
-            card: cardElement,
-            billing_details: {
-              name: user?.name || user?.address || 'Customer',
+      // Confirm payment with error handling for unmounted elements
+      let paymentResult: { error?: any; paymentIntent?: any } | null = null;
+      try {
+        paymentResult = await stripe.confirmCardPayment(
+          clientSecret,
+          {
+            payment_method: {
+              card: cardElement,
+              billing_details: {
+                name: user?.name || user?.address || 'Customer',
+              },
             },
-          },
+          }
+        );
+      } catch (confirmError: any) {
+        // Handle IntegrationError specifically
+        if (confirmError?.code === 'integration_error' || confirmError?.message?.includes('Element')) {
+          logger.error('Stripe Element integration error', confirmError, {
+            isMounted,
+            cardElementReady,
+            hasCardElement: !!cardElement
+          });
+          throw new Error('Payment form is not ready. Please wait a moment and try again.');
         }
-      );
+        throw confirmError;
+      }
+
+      if (!paymentResult) {
+        throw new Error('Payment confirmation returned no result');
+      }
+
+      const { error, paymentIntent } = paymentResult;
 
       if (error) {
+        logger.error('Stripe payment error', error, { 
+          type: error.type, 
+          code: error.code,
+          paymentIntentId: paymentIntent?.id 
+        });
         setPaymentStep('error');
-        onError(error.message || 'Payment failed');
-        showError(error.message || 'Payment failed');
+        const errorMessage = error.message || 'Payment failed. Please check your card details and try again.';
+        onError(errorMessage);
+        showError(errorMessage);
         setLoading(false);
         return;
       }
@@ -209,7 +354,6 @@ function PaymentForm({
           <div className="flex items-center justify-between text-sm">
             <span className={`font-medium ${
               paymentStep === 'completed' ? 'text-green-400' : 
-              paymentStep === 'error' ? 'text-red-400' : 
               'text-primary-gray-lighter'
             }`}>
               {progress.label}
@@ -222,7 +366,6 @@ function PaymentForm({
             <div
               className={`h-2.5 rounded-full transition-all duration-500 ease-out ${
                 paymentStep === 'completed' ? 'bg-green-500' :
-                paymentStep === 'error' ? 'bg-red-500' :
                 'bg-accent-yellow'
               }`}
               style={{ width: `${progress.percentage}%` }}
@@ -237,10 +380,44 @@ function PaymentForm({
       )}
 
       {/* Card Input - Hide when processing/completing */}
-      {paymentStep !== 'processing' && paymentStep !== 'completing' && paymentStep !== 'completed' && (
+      {paymentStep !== 'processing' && paymentStep !== 'completing' && paymentStep !== 'completed' && 
+       stripe && elements && clientSecret && paymentStep === 'ready' && (
         <>
-          <div className="p-4 bg-black border border-primary-gray-light rounded-xl">
-            <CardElement options={cardElementOptions} />
+          <div className="space-y-2">
+            <label htmlFor="stripe-card-element" className="block text-sm font-medium text-primary-gray-lighter">
+              Card Details
+            </label>
+            <div 
+              id="stripe-card-element-container"
+              className="p-4 bg-black border border-primary-gray-light rounded-xl min-h-[50px]"
+              role="group"
+              aria-labelledby="stripe-card-element-label"
+            >
+              <span id="stripe-card-element-label" className="sr-only">Card number, expiration date, and CVC</span>
+              <CardElement 
+                id="stripe-card-element"
+                key={`card-${clientSecret}`} // Force remount when clientSecret changes
+                options={cardElementOptions}
+                onReady={(element) => {
+                  logger.debug('CardElement is ready', { hasElement: !!element });
+                  if (element) {
+                    cardElementRef.current = element;
+                    setCardElementReady(true);
+                  }
+                }}
+                onChange={(e) => {
+                  if (e.error) {
+                    logger.debug('CardElement validation error', { error: e.error.message });
+                    setCardElementReady(false);
+                  } else if (e.complete) {
+                    setCardElementReady(true);
+                  } else {
+                    // Element is being filled but not complete yet
+                    setCardElementReady(true); // Allow submission even if not complete
+                  }
+                }}
+              />
+            </div>
           </div>
 
           <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-4">
@@ -303,10 +480,12 @@ function PaymentForm({
       {paymentStep !== 'processing' && paymentStep !== 'completing' && paymentStep !== 'completed' && (
         <button
           type="submit"
-          disabled={!stripe || loading || paymentStep !== 'ready'}
+          disabled={!stripe || loading || paymentStep !== 'ready' || !cardElementReady}
           className="w-full py-4 bg-accent-yellow text-black font-semibold text-lg rounded-xl hover:bg-accent-yellow-light transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {paymentStep === 'error' ? 'Try Again' : `Pay €${amount.toFixed(2)}`}
+          {paymentStep === 'error' ? 'Try Again' : 
+           !cardElementReady ? 'Loading payment form...' : 
+           `Pay €${amount.toFixed(2)}`}
         </button>
       )}
     </form>
@@ -326,7 +505,7 @@ export default function CardPaymentForm({
     currency: currency.toLowerCase(),
   };
 
-  if (!process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY) {
+  if (!stripePublishableKey || !stripePromise) {
     return (
       <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-xl">
         <p className="text-red-400 text-sm">

@@ -69,7 +69,7 @@ export interface UserProfile {
     verificationDate?: number;
     verificationId?: string;
     provider?: 'stripe' | 'sumsub' | 'onfido' | 'custom';
-    status?: 'pending' | 'verified' | 'failed' | 'expired';
+    status?: 'pending' | 'processing' | 'verified' | 'failed' | 'expired' | 'canceled' | 'requires_input';
   };
   kycHistory?: Array<{
     verificationId: string;
@@ -94,6 +94,8 @@ export const generateReferralCode = (address: string): string => {
 
 /**
  * Get user profile from storage
+ * @deprecated Use useProfile hook or getUserProfileFromAPI instead
+ * This function uses localStorage and is being phased out in favor of API-based storage
  */
 export const getUserProfile = (address: string): UserProfile | null => {
   if (typeof window === 'undefined') return null;
@@ -118,6 +120,8 @@ export const getUserProfile = (address: string): UserProfile | null => {
 
 /**
  * Save user profile to storage
+ * @deprecated Use useProfileMutation hook or saveUserProfileToAPI instead
+ * This function uses localStorage and is being phased out in favor of API-based storage
  */
 export const saveUserProfile = (address: string, profile: UserProfile): void => {
   if (typeof window === 'undefined') return;

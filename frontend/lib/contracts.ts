@@ -1,4 +1,4 @@
-import { ethers } from 'ethers';
+import { BrowserProvider, Contract } from 'ethers';
 
 // ABI для InvestmentPool (упрощенная версия, основные функции)
 export const INVESTMENT_POOL_ABI = [
@@ -48,7 +48,7 @@ export const getContractAddresses = () => {
 // Получить провайдер
 export const getProvider = () => {
   if (typeof window !== 'undefined' && (window as any).ethereum) {
-    return new ethers.BrowserProvider((window as any).ethereum);
+    return new BrowserProvider((window as any).ethereum);
   }
   return null;
 };
@@ -78,7 +78,7 @@ export const getInvestmentPoolContract = async (address?: string) => {
       return null;
     }
     
-    return new ethers.Contract(contractAddress, INVESTMENT_POOL_ABI, signer);
+    return new Contract(contractAddress, INVESTMENT_POOL_ABI, signer);
   } catch (error: any) {
     // Игнорируем ошибки, если просто нет подключения или контракта
     if (error.code !== 'UNSUPPORTED_OPERATION' && !error.message?.includes('user rejected')) {
@@ -97,7 +97,7 @@ export const getLotteryContract = async (address?: string) => {
   const contractAddress = address || addresses.lottery;
   if (!contractAddress) return null;
   
-  return new ethers.Contract(contractAddress, LOTTERY_ABI, signer);
+  return new Contract(contractAddress, LOTTERY_ABI, signer);
 };
 
 // Получить контракт BitcoinPriceBet
@@ -109,6 +109,6 @@ export const getBTCBetContract = async (address?: string) => {
   const contractAddress = address || addresses.btcBet;
   if (!contractAddress) return null;
   
-  return new ethers.Contract(contractAddress, BTC_BET_ABI, signer);
+  return new Contract(contractAddress, BTC_BET_ABI, signer);
 };
 

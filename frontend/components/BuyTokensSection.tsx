@@ -11,9 +11,15 @@ import { useProfile } from '@/hooks/useProfile';
 import { useProfileMutation } from '@/hooks/useProfileMutation';
 import { useTransactions } from '@/hooks/useTransactions';
 import { fetchCryptoPrice } from '@/lib/price-api';
+import dynamic from 'next/dynamic';
 import KYCGate from './KYCGate';
-import CardPaymentForm from './CardPaymentForm';
-import { ethers } from 'ethers';
+import { Contract, parseEther, formatEther, parseUnits, formatUnits } from 'ethers';
+import type { TransactionResponse } from 'ethers';
+
+// Lazy load CardPaymentForm - only load when needed (contains Stripe.js)
+const CardPaymentForm = dynamic(() => import('./CardPaymentForm'), {
+  ssr: false,
+});
 import { getSigner } from '@/lib/contracts';
 import { useToast } from '@/hooks/useToast';
 import { logger } from '@/lib/logger';
@@ -73,7 +79,7 @@ function BuyTokensSection() {
     } else if (canceled === 'true') {
       setMessage({ type: 'error', text: 'Payment was canceled' });
     }
-  }, [searchParams, verifyPayment]);
+  }, []);
 
   // Обновить баланс при загрузке компонента и при изменении пользователя
   useEffect(() => {
@@ -116,18 +122,37 @@ function BuyTokensSection() {
         });
       }
 
-      // TODO: Add tokens to portfolio via API endpoint
-      // Portfolio API endpoint needs to be created
-      // await addToPortfolio(user.address, {
-      //   id: `tai_${Date.now()}`,
-      //   symbol: 'TAI',
-      //   name: '$TAI Token',
-      //   amount: tokensAmount,
-      //   purchasePrice: '1.00',
-      //   currentPrice: '1.00',
-      //   currentValue: amount,
-      //   purchaseDate: Date.now(),
-      // });
+      // Add tokens to portfolio via API endpoint
+      try {
+        const portfolioResponse = await fetch(`/api/profile/${user.address}/portfolio`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            type: 'token',
+            symbol: 'TAI',
+            name: '$TAI Token',
+            quantity: parseFloat(tokensAmount),
+            purchasePrice: 1.0,
+            currentPrice: 1.0,
+            purchaseDate: Date.now(),
+            currency: 'EUR',
+            totalCost: amount,
+          }),
+        });
+
+        if (portfolioResponse.ok) {
+          logger.info('Tokens added to portfolio via Stripe', { tokensAmount, amount });
+        } else {
+          logger.warn('Failed to add tokens to portfolio via Stripe', { 
+            status: portfolioResponse.status,
+            tokensAmount 
+          });
+        }
+      } catch (portfolioError) {
+        logger.error('Error adding tokens to portfolio via Stripe', portfolioError as Error, { tokensAmount });
+      }
 
       setMessage({
         type: 'success',
@@ -174,6 +199,20 @@ function BuyTokensSection() {
       setMessage({ type: 'error', text: message || 'Failed to verify payment' });
     }
   }, [handleCardPaymentSuccess]);
+
+  // Update useEffect to use verifyPayment after it's defined
+  useEffect(() => {
+    const success = searchParams?.get('success');
+    const canceled = searchParams?.get('canceled');
+    const sessionId = searchParams?.get('session_id');
+
+    if (success === 'true' && sessionId) {
+      // Verify the payment
+      verifyPayment(sessionId);
+    } else if (canceled === 'true') {
+      setMessage({ type: 'error', text: 'Payment was canceled' });
+    }
+  }, [searchParams, verifyPayment]);
 
   const tokenPrice = 1; // 1 $TAI = 1 EUR (примерно)
 
@@ -364,7 +403,7 @@ function BuyTokensSection() {
           throw new Error('Failed to get wallet signer. Please connect your wallet.');
         }
         
-        let tx: ethers.ContractTransactionResponse;
+          let tx: TransactionResponse;
         let cryptoAmount: number;
         let cryptoSymbol: string;
         
@@ -382,7 +421,7 @@ function BuyTokensSection() {
           // Проверить баланс пользователя
           logger.debug('Checking balance', { address: user.address });
           const balance = await signer.provider.getBalance(user.address);
-          const balanceInEth = parseFloat(ethers.formatEther(balance));
+          const balanceInEth = parseFloat(formatEther(balance));
           logger.debug('Balance retrieved', { balanceInEth, currency: 'ETH' });
           
           // Получить информацию о сети для отладки
@@ -412,7 +451,7 @@ function BuyTokensSection() {
           
           tx = await signer.sendTransaction({
             to: treasuryAddress,
-            value: ethers.parseEther(cryptoAmount.toFixed(18)),
+            value: parseEther(cryptoAmount.toFixed(18)),
           });
         } else {
           // Для USDT и WBTC - работа с ERC-20 токенами
@@ -433,16 +472,16 @@ function BuyTokensSection() {
           cryptoSymbol = cryptoCurrency;
           
           // Получить контракт токена
-          const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, signer);
+          const tokenContract = new Contract(tokenAddress, ERC20_ABI, signer);
           
           // Получить decimals токена
           const decimals = await tokenContract.decimals();
           const decimalsNumber = Number(decimals);
-          const amountInWei = ethers.parseUnits(cryptoAmount.toFixed(decimalsNumber), decimalsNumber);
+          const amountInWei = parseUnits(cryptoAmount.toFixed(decimalsNumber), decimalsNumber);
           
           // Проверить баланс пользователя
           const balance = await tokenContract.balanceOf(user.address);
-          const balanceFormatted = parseFloat(ethers.formatUnits(balance, decimalsNumber));
+          const balanceFormatted = parseFloat(formatUnits(balance, decimalsNumber));
           
           if (balanceFormatted < cryptoAmount) {
             const shortfall = cryptoAmount - balanceFormatted;
@@ -466,7 +505,7 @@ function BuyTokensSection() {
             });
             
             // Одобрить максимальное количество (или можно одобрить только нужное)
-            const approveTx = await tokenContract.approve(treasuryAddress, ethers.MaxUint256);
+            const approveTx = await tokenContract.approve(treasuryAddress, BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'));
             await approveTx.wait();
           }
           
@@ -536,24 +575,41 @@ function BuyTokensSection() {
                   tokensAmount,
                 });
                 
-                // TODO: Add tokens to portfolio via API endpoint
-                // Portfolio API endpoint needs to be created
-                // await addToPortfolio(user.address, {
-                //   type: 'token',
-                //   symbol: 'TAI',
-                //   name: 'Tokenized Asset Investment',
-                //   quantity: tokensAmount,
-                //   purchasePrice: tokenPricePerUnit,
-                //   currentPrice: tokenPricePerUnit,
-                //   purchaseDate: Date.now(),
-                //   currency: 'EUR',
-                //   totalCost: amountInEur, // Стоимость покупки в EUR
-                // });
-              
-                logger.debug('Tokens added to portfolio', { tokensAmount });
+                // Add tokens to portfolio via API endpoint
+                try {
+                  const portfolioResponse = await fetch(`/api/profile/${user.address}/portfolio`, {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                      type: 'token',
+                      symbol: 'TAI',
+                      name: '$TAI Token',
+                      quantity: tokensAmount,
+                      purchasePrice: 1.0, // 1 EUR = 1 TAI
+                      currentPrice: 1.0,
+                      purchaseDate: Date.now(),
+                      currency: 'EUR',
+                      totalCost: amountInEur,
+                    }),
+                  });
+
+                  if (portfolioResponse.ok) {
+                    logger.info('Tokens added to portfolio', { tokensAmount, amountInEur });
+                  } else {
+                    logger.warn('Failed to add tokens to portfolio', { 
+                      status: portfolioResponse.status,
+                      tokensAmount 
+                    });
+                  }
+                } catch (portfolioError) {
+                  logger.error('Error adding tokens to portfolio', portfolioError as Error, { tokensAmount });
+                }
               } else {
-                logger.error('Failed to save transaction', undefined, { userId: user.address });
+                logger.error('Failed to save transaction', new Error('Transaction save failed'), { userId: user.address });
               }
+            }
           }
           
           setMessage({ 
@@ -571,9 +627,7 @@ function BuyTokensSection() {
         } else {
           throw new Error('Transaction failed. Please try again.');
         }
-      }
-      
-      if (paymentMethod === 'card') {
+      } else if (paymentMethod === 'card') {
         // Create Stripe Checkout Session
         const response = await fetch('/api/stripe/create-checkout', {
           method: 'POST',
@@ -594,8 +648,9 @@ function BuyTokensSection() {
 
         // Redirect to Stripe Checkout
         window.location.href = data.url;
+      } else {
+        throw new Error(`Invalid payment method: ${paymentMethod}`);
       }
-    }
     } catch (error: unknown) {
       const { message } = handleError(error);
       logger.error('Error processing purchase', error, { 
@@ -949,7 +1004,7 @@ function BuyTokensSection() {
             const kycRequired = amountInEur > 1000;
             const isVerified = profile?.kycStatus?.verified || false;
 
-            if (kycRequired && !isVerified && amountInEur >= minAmount) {
+            if (kycRequired && !isVerified && amountInEur >= MIN_INVESTMENT_AMOUNT) {
               return (
                 <KYCGate 
                   requiredAmount={1000}
@@ -985,7 +1040,7 @@ function BuyTokensSection() {
                 )}
 
                 {/* Warning for approaching KYC threshold */}
-                {!kycRequired && amountInEur > 500 && amountInEur >= minAmount && (
+                {!kycRequired && amountInEur > 500 && amountInEur >= MIN_INVESTMENT_AMOUNT && (
                   <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
                     <div className="flex items-start gap-2 text-sm text-yellow-800">
                       <svg className="w-5 h-5 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">

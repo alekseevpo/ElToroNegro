@@ -61,7 +61,7 @@ function prismaUserToProfile(user: UserWithRelations): UserProfile {
       verificationDate: user.kycVerificationDate?.getTime(),
       verificationId: user.kycVerificationId || undefined,
       provider: (user.kycProvider && isKYCProvider(user.kycProvider) ? user.kycProvider : 'stripe') as KYCProvider,
-      status: (user.kycStatus && isKYCStatus(user.kycStatus) ? user.kycStatus : 'pending') as KYCStatus,
+        status: (user.kycStatus && isKYCStatus(user.kycStatus) && ['pending', 'verified', 'failed', 'expired'].includes(user.kycStatus) ? user.kycStatus : 'pending') as 'pending' | 'verified' | 'failed' | 'expired',
     } : undefined,
     kycHistory: user.kycHistory?.map((k) => ({
       verificationId: k.verificationId,
@@ -246,6 +246,16 @@ export async function saveUserProfileToDB(address: string, profile: UserProfile)
         transactions: true,
         portfolioAssets: true,
         kycHistory: true,
+        referrals: {
+          select: {
+            address: true,
+          },
+        },
+        referredByUser: {
+          select: {
+            referralCode: true,
+          },
+        },
       },
     });
 
@@ -293,7 +303,35 @@ export async function saveUserProfileToDB(address: string, profile: UserProfile)
       }
     }
 
-    return prismaUserToProfile(user);
+    // Reload user with all relations after updates
+    const updatedUser = await prisma.user.findUnique({
+      where: { address: addressLower },
+      include: {
+        wallets: true,
+        socialConnections: true,
+        transactions: {
+          orderBy: { timestamp: 'desc' },
+        },
+        portfolioAssets: true,
+        kycHistory: {
+          orderBy: { verificationDate: 'desc' },
+        },
+        referrals: {
+          select: {
+            address: true,
+          },
+        },
+        referredByUser: {
+          select: {
+            referralCode: true,
+          },
+        },
+      },
+    });
+
+    if (!updatedUser) return null;
+
+    return prismaUserToProfile(updatedUser);
   } catch (error) {
     logger.error('Error saving user profile to DB', error, { address });
     return null;
@@ -354,6 +392,16 @@ export async function initializeProfileInDB(
         transactions: true,
         portfolioAssets: true,
         kycHistory: true,
+        referrals: {
+          select: {
+            address: true,
+          },
+        },
+        referredByUser: {
+          select: {
+            referralCode: true,
+          },
+        },
       },
     });
     
@@ -387,7 +435,7 @@ export async function updateProfileInDB(
         avatar: updates.avatar !== undefined ? updates.avatar : undefined,
         email: updates.email !== undefined ? updates.email?.toLowerCase() : undefined,
         passwordHash: updates.passwordHash !== undefined ? updates.passwordHash : undefined,
-        referredBy: updates.referredBy !== undefined ? updates.referredBy : undefined,
+        // referredBy cannot be updated directly - it's a relation via referredById
         emailVerified: updates.emailVerified !== undefined ? updates.emailVerified : undefined,
         emailVerificationToken: updates.emailVerificationToken !== undefined ? updates.emailVerificationToken : undefined,
         emailVerificationSentAt: updates.emailVerificationSentAt 
@@ -400,6 +448,16 @@ export async function updateProfileInDB(
         transactions: true,
         portfolioAssets: true,
         kycHistory: true,
+        referrals: {
+          select: {
+            address: true,
+          },
+        },
+        referredByUser: {
+          select: {
+            referralCode: true,
+          },
+        },
       },
     });
     
@@ -575,6 +633,125 @@ export async function findAddressByReferralCodeInDB(referralCode: string): Promi
     return user?.address || null;
   } catch (error) {
     logger.error('Error finding address by referral code in DB', error, { referralCode });
+    return null;
+  }
+}
+
+/**
+ * Add or update asset in portfolio
+ */
+export async function addAssetToPortfolioInDB(
+  address: string,
+  asset: Omit<PortfolioAsset, 'id' | 'totalValue' | 'profit' | 'profitPercent'>
+): Promise<PortfolioAsset | null> {
+  try {
+    const addressLower = address.toLowerCase();
+    const user = await prisma.user.findUnique({
+      where: { address: addressLower },
+      include: { portfolioAssets: true },
+    });
+    
+    if (!user) return null;
+    
+    // Calculate derived values
+    const totalValue = asset.quantity * asset.currentPrice;
+    const profit = totalValue - asset.totalCost;
+    const profitPercent = asset.totalCost > 0 
+      ? ((totalValue - asset.totalCost) / asset.totalCost) * 100 
+      : 0;
+    
+    // Check if asset already exists (same symbol and type)
+    const existingAsset = user.portfolioAssets.find(
+      a => a.symbol === asset.symbol && a.type === asset.type
+    );
+    
+    if (existingAsset) {
+      // Update existing asset: calculate weighted average purchase price
+      const totalQuantity = existingAsset.quantity + asset.quantity;
+      const totalCost = existingAsset.totalCost + asset.totalCost;
+      const avgPrice = totalCost / totalQuantity;
+      
+      const updatedAsset = await prisma.portfolioAsset.update({
+        where: { id: existingAsset.id },
+        data: {
+          quantity: totalQuantity,
+          purchasePrice: avgPrice,
+          currentPrice: asset.currentPrice,
+          totalCost,
+          totalValue: totalQuantity * asset.currentPrice,
+          profit: (totalQuantity * asset.currentPrice) - totalCost,
+          profitPercent: totalCost > 0 
+            ? (((totalQuantity * asset.currentPrice) - totalCost) / totalCost) * 100 
+            : 0,
+          // Keep the earliest purchase date
+          purchaseDate: existingAsset.purchaseDate < new Date(asset.purchaseDate)
+            ? existingAsset.purchaseDate
+            : new Date(asset.purchaseDate),
+          // Sum interest earned
+          interestEarned: (existingAsset.interestEarned || 0) + (asset.interestEarned || 0),
+          interestRate: asset.interestRate || existingAsset.interestRate,
+        },
+      });
+      
+      return {
+        id: updatedAsset.id,
+        type: updatedAsset.type as PortfolioAsset['type'],
+        symbol: updatedAsset.symbol,
+        name: updatedAsset.name,
+        quantity: updatedAsset.quantity,
+        purchasePrice: updatedAsset.purchasePrice,
+        currentPrice: updatedAsset.currentPrice,
+        purchaseDate: updatedAsset.purchaseDate.getTime(),
+        currency: updatedAsset.currency as PortfolioAsset['currency'],
+        totalCost: updatedAsset.totalCost,
+        totalValue: updatedAsset.totalValue,
+        profit: updatedAsset.profit,
+        profitPercent: updatedAsset.profitPercent,
+        interestEarned: updatedAsset.interestEarned || undefined,
+        interestRate: updatedAsset.interestRate || undefined,
+      };
+    } else {
+      // Create new asset
+      const newAsset = await prisma.portfolioAsset.create({
+        data: {
+          userId: user.id,
+          type: asset.type,
+          symbol: asset.symbol,
+          name: asset.name,
+          quantity: asset.quantity,
+          purchasePrice: asset.purchasePrice,
+          currentPrice: asset.currentPrice,
+          purchaseDate: new Date(asset.purchaseDate),
+          currency: asset.currency,
+          totalCost: asset.totalCost,
+          totalValue,
+          profit,
+          profitPercent,
+          interestEarned: asset.interestEarned || 0,
+          interestRate: asset.interestRate,
+        },
+      });
+      
+      return {
+        id: newAsset.id,
+        type: newAsset.type as PortfolioAsset['type'],
+        symbol: newAsset.symbol,
+        name: newAsset.name,
+        quantity: newAsset.quantity,
+        purchasePrice: newAsset.purchasePrice,
+        currentPrice: newAsset.currentPrice,
+        purchaseDate: newAsset.purchaseDate.getTime(),
+        currency: newAsset.currency as PortfolioAsset['currency'],
+        totalCost: newAsset.totalCost,
+        totalValue: newAsset.totalValue,
+        profit: newAsset.profit,
+        profitPercent: newAsset.profitPercent,
+        interestEarned: newAsset.interestEarned || undefined,
+        interestRate: newAsset.interestRate || undefined,
+      };
+    }
+  } catch (error) {
+    logger.error('Error adding asset to portfolio in DB', error, { address, assetSymbol: asset.symbol });
     return null;
   }
 }

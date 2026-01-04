@@ -164,7 +164,7 @@ export default function PortfolioChart({ address, investments = [], className = 
   return (
     <div className={`bg-primary-gray rounded-xl p-6 border border-primary-gray-light ${className}`}>
       <div className="mb-6">
-        <h3 className="text-xl font-bold text-accent-yellow mb-2">Portfolio Growth</h3>
+        <h3 className="text-xl font-bold text-accent-yellow mb-2">P&L</h3>
         {currentStats && (
           <div className="flex items-center gap-6 text-sm">
             <div>

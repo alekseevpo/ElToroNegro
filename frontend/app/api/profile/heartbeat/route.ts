@@ -20,13 +20,25 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Try to find user first - check by address or email
+    // Try to find user first - check by address, email, or wallet
     let user = null;
     
     if (address) {
+      // First, try to find by address directly
       user = await prisma.user.findUnique({
         where: { address: address.toLowerCase() },
       });
+      
+      // If not found and it's a wallet address, check if it's linked to any user via Wallet table
+      if (!user && address.startsWith('0x')) {
+        const wallet = await prisma.wallet.findFirst({
+          where: { address: address.toLowerCase() },
+          include: { user: true },
+        });
+        if (wallet?.user) {
+          user = wallet.user;
+        }
+      }
     }
     
     if (!user && email) {
@@ -62,13 +74,58 @@ export async function POST(request: NextRequest) {
             });
           }
         } else if (address) {
-          // For wallet-based auth, use address
-          const username = `user_${address.slice(2, 8)}`;
-          const profile = await initializeProfileInDB(address.toLowerCase(), username);
-          if (profile) {
-            user = await prisma.user.findUnique({
-              where: { address: address.toLowerCase() },
+          // For wallet-based auth, check if there's a user with this email already
+          // If user added email to their wallet profile, we should use that profile
+          if (email) {
+            const existingUserWithEmail = await prisma.user.findFirst({
+              where: {
+                OR: [
+                  { email: email.toLowerCase() },
+                  { address: email.toLowerCase() },
+                ],
+              },
             });
+            
+            if (existingUserWithEmail) {
+              // Link wallet to existing user profile
+              const existingWallet = await prisma.wallet.findFirst({
+                where: {
+                  address: address.toLowerCase(),
+                },
+              });
+              
+              if (existingWallet) {
+                // Update existing wallet to link to this user
+                await prisma.wallet.update({
+                  where: { id: existingWallet.id },
+                  data: {
+                    userId: existingUserWithEmail.id,
+                    type: 'metamask',
+                  },
+                });
+              } else {
+                // Create new wallet link
+                await prisma.wallet.create({
+                  data: {
+                    userId: existingUserWithEmail.id,
+                    type: 'metamask',
+                    address: address.toLowerCase(),
+                  },
+                });
+              }
+              user = existingUserWithEmail;
+            }
+          }
+          
+          // If no existing user found, create new profile
+          if (!user) {
+            const username = `user_${address.slice(2, 8)}`;
+            const profile = await initializeProfileInDB(address.toLowerCase(), username);
+            if (profile) {
+              user = await prisma.user.findUnique({
+                where: { address: address.toLowerCase() },
+              });
+            }
           }
         }
       } catch (createError) {
@@ -94,6 +151,50 @@ export async function POST(request: NextRequest) {
       // Update name if provided and not set
       if (name && !user.name) {
         updateData.name = name;
+      }
+      
+      // If user logged in with wallet and has email, link wallet to user profile
+      if (address && address.startsWith('0x') && email) {
+        // Check if wallet is already linked
+        const existingWallet = await prisma.wallet.findFirst({
+          where: { address: address.toLowerCase() },
+        });
+        
+        if (!existingWallet || existingWallet.userId !== user.id) {
+          // Link wallet to this user
+          if (existingWallet) {
+            // Update existing wallet to link to this user
+            await prisma.wallet.update({
+              where: { id: existingWallet.id },
+              data: {
+                userId: user.id,
+                type: 'metamask',
+              },
+            });
+          } else {
+            // Create new wallet link
+            await prisma.wallet.create({
+              data: {
+                userId: user.id,
+                type: 'metamask',
+                address: address.toLowerCase(),
+              },
+            });
+          }
+        }
+      }
+      
+      // If user logged in with wallet (no email), check if wallet is linked to user with email
+      if (address && address.startsWith('0x') && !email && !user.email) {
+        const wallet = await prisma.wallet.findFirst({
+          where: { address: address.toLowerCase() },
+          include: { user: true },
+        });
+        
+        // If wallet is linked to a user with email, use that user instead
+        if (wallet?.user && wallet.user.email) {
+          user = wallet.user;
+        }
       }
       
       await prisma.user.update({

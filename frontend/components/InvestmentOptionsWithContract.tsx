@@ -5,11 +5,19 @@ import Link from 'next/link';
 import { useInvestmentPool } from '@/hooks/useInvestmentPool';
 import { useAuth } from '@/contexts/AuthContext';
 import { useMultipleCryptoPrices } from '@/hooks/useCryptoPrices';
-import { getMockPriceData } from '@/lib/price-api';
+import { useMultipleStockPrices, useMultipleCommodityPrices } from '@/hooks/useStockPrices';
+import { getMockPriceData, fetchStockPrice, fetchCommodityPrice, type AssetPriceData } from '@/lib/price-api';
 import { addTransaction, addToPortfolio, isKYCVerified } from '@/lib/profile-utils';
+import dynamic from 'next/dynamic';
 import KYCGate from './KYCGate';
-import CardPaymentForm from './CardPaymentForm';
 import { useToast } from '@/hooks/useToast';
+import QuickViewModal from './QuickViewModal';
+import { useRouter } from 'next/navigation';
+
+// Lazy load CardPaymentForm - only load when needed (contains Stripe.js)
+const CardPaymentForm = dynamic(() => import('./CardPaymentForm'), {
+  ssr: false,
+});
 import { useETHPrice } from '@/hooks/useETHPrice';
 import { logger } from '@/lib/logger';
 import { handleError } from '@/lib/error-handler';
@@ -27,10 +35,11 @@ interface Asset {
 }
 
 const baseAssets: Asset[] = [
-  // Stocks
-  { id: '1', name: 'Apple Inc.', symbol: 'AAPL', category: 'stocks', price: 175.50, change: 2.3, minInvestment: 10, basePrice: 175.50 },
-  { id: '2', name: 'Microsoft', symbol: 'MSFT', category: 'stocks', price: 378.85, change: 1.8, minInvestment: 10, basePrice: 378.85 },
-  { id: '3', name: 'Google', symbol: 'GOOGL', category: 'stocks', price: 142.30, change: -0.5, minInvestment: 10, basePrice: 142.30 },
+  // Stocks - Base prices are fallback values (updated Jan 2025)
+  // Real prices come from API when available
+  { id: '1', name: 'Apple Inc.', symbol: 'AAPL', category: 'stocks', price: 272.10, change: -0.44, minInvestment: 10, basePrice: 272.10 },
+  { id: '2', name: 'Microsoft', symbol: 'MSFT', category: 'stocks', price: 420.00, change: 1.2, minInvestment: 10, basePrice: 420.00 },
+  { id: '3', name: 'Google', symbol: 'GOOGL', category: 'stocks', price: 155.00, change: -0.3, minInvestment: 10, basePrice: 155.00 },
   // Commodities
   { id: '4', name: 'Gold', symbol: 'XAU', category: 'commodities', price: 2045.50, change: 0.8, minInvestment: 10, basePrice: 2045.50 },
   { id: '5', name: 'Crude Oil', symbol: 'CL', category: 'commodities', price: 82.40, change: -1.2, minInvestment: 10, basePrice: 82.40 },
@@ -68,7 +77,10 @@ function InvestmentOptionsWithContract() {
 
   const [selectedCategory, setSelectedCategory] = useState<'all' | 'stocks' | 'commodities' | 'crypto' | 'cloud-storage' | 'innovative-projects'>('all');
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
+  const [quickViewModalOpen, setQuickViewModalOpen] = useState(false);
+  const [assetForQuickView, setAssetForQuickView] = useState<Asset | null>(null);
   const [investmentAmount, setInvestmentAmount] = useState('');
+  const router = useRouter();
   const [userStats, setUserStats] = useState<any>(null);
   const [userInvestments, setUserInvestments] = useState<any[]>([]);
   const [isInvesting, setIsInvesting] = useState(false);
@@ -77,13 +89,23 @@ function InvestmentOptionsWithContract() {
   const [validationError, setValidationError] = useState<string | null>(null);
   const { showSuccess, showError } = useToast();
   
-  // Get real-time ETH price in EUR
-  const { price: ethPriceInEur, isLoading: ethPriceLoading } = useETHPrice();
+  // Get real-time ETH price in USD
+  const { price: ethPriceInUsd, isLoading: ethPriceLoading } = useETHPrice();
   
-  // Мемоизируем список крипто-активов и их символы
+  // Мемоизируем списки активов по категориям
   const cryptoAssets = useMemo(() => baseAssets.filter(a => a.category === 'crypto'), []);
+  const stockAssets = useMemo(() => baseAssets.filter(a => a.category === 'stocks'), []);
+  const commodityAssets = useMemo(() => baseAssets.filter(a => a.category === 'commodities'), []);
+  
   const cryptoSymbols = useMemo(() => cryptoAssets.map(a => a.symbol), [cryptoAssets]);
-  const { data: cryptoPrices = {}, isLoading: pricesLoading } = useMultipleCryptoPrices(cryptoSymbols);
+  const stockSymbols = useMemo(() => stockAssets.map(a => a.symbol), [stockAssets]);
+  const commoditySymbols = useMemo(() => commodityAssets.map(a => a.symbol), [commodityAssets]);
+  
+  const { data: cryptoPrices = {}, isLoading: cryptoPricesLoading } = useMultipleCryptoPrices(cryptoSymbols);
+  const { data: stockPrices = {}, isLoading: stockPricesLoading } = useMultipleStockPrices(stockSymbols);
+  const { data: commodityPrices = {}, isLoading: commodityPricesLoading } = useMultipleCommodityPrices(commoditySymbols);
+  
+  const pricesLoading = cryptoPricesLoading || stockPricesLoading || commodityPricesLoading;
 
   // Мемоизируем mock данные для не-крипто активов, чтобы избежать бесконечных ререндеров
   // Используем asset.id как seed для детерминированной генерации (избегаем проблем гидратации)
@@ -112,13 +134,41 @@ function InvestmentOptionsWithContract() {
         const priceData = cryptoPrices[asset.symbol];
         return {
           ...asset,
-          price: priceData.price, // Price is already in EUR from CoinGecko
+          price: priceData.price, // Price is already in USD from CoinGecko
           change: priceData.change24h,
           priceData,
         };
-      } else if (asset.basePrice && asset.category !== 'crypto') {
-        // Используем кэшированные mock данные вместо генерации новых
-        // Используем asset.id как seed для консистентности
+      } 
+      // Для акций: используем реальные цены из API
+      else if (asset.category === 'stocks' && !isServer && stockPrices[asset.symbol]) {
+        const priceData = stockPrices[asset.symbol];
+        // Only use API data if it's valid and recent (within last 2 hours)
+        if (priceData && priceData.price > 0 && priceData.lastUpdated && (Date.now() - priceData.lastUpdated) < 7200000) {
+          return {
+            ...asset,
+            price: priceData.price, // Price is in USD from API
+            change: priceData.change24h,
+            priceData,
+          };
+        }
+        // If API data is stale or invalid, log warning and use basePrice
+        if (isServer === false) {
+          console.warn(`Stock price API data for ${asset.symbol} is stale or invalid. Using base price: $${asset.basePrice}`);
+        }
+      }
+      // Для товаров: используем реальные цены из CoinGecko
+      else if (asset.category === 'commodities' && !isServer && commodityPrices[asset.symbol]) {
+        const priceData = commodityPrices[asset.symbol];
+        return {
+          ...asset,
+          price: priceData.price, // Price is in USD from CoinGecko
+          change: priceData.change24h,
+          priceData,
+        };
+      }
+      // Fallback: используем mock данные только если реальные данные недоступны
+      else if (asset.basePrice && asset.category !== 'crypto' && asset.category !== 'stocks' && asset.category !== 'commodities') {
+        // Для cloud-storage и innovative-projects используем mock данные
         const mockData = mockPriceCache[asset.id] || getMockPriceData(asset.basePrice, 0.02, asset.id);
         return {
           ...asset,
@@ -127,10 +177,10 @@ function InvestmentOptionsWithContract() {
           priceData: mockData,
         };
       }
-      // Для крипто на сервере или если цены не загружены - используем начальные значения
+      // Если реальные данные еще не загружены, используем начальные значения
       return asset;
     });
-  }, [cryptoPrices, mockPriceCache]);
+  }, [cryptoPrices, stockPrices, commodityPrices, mockPriceCache]);
 
   // Мемоизируем loadUserData чтобы избежать бесконечных циклов
   const loadUserData = useCallback(async () => {
@@ -188,7 +238,7 @@ function InvestmentOptionsWithContract() {
     
     const minAmount = parseFloat(minInvestment || '0');
     if (amount < minAmount) {
-      const errorMsg = `Minimum investment is ${minAmount} ETH${ethPriceInEur ? ` (~€${(minAmount * ethPriceInEur).toFixed(2)})` : ''}`;
+      const errorMsg = `Minimum investment is ${minAmount} ETH${ethPriceInUsd ? ` (~$${(minAmount * ethPriceInUsd).toFixed(2)})` : ''}`;
       setMessage({ type: 'error', text: errorMsg });
       setValidationError(errorMsg);
       return;
@@ -197,16 +247,16 @@ function InvestmentOptionsWithContract() {
     // Clear validation error if all checks pass
     setValidationError(null);
 
-    // Check KYC for investments > €1000
-    // Use real-time ETH price or fallback to 25000 if not available
-    const ethToEurRate = ethPriceInEur || 25000;
-    const eurAmount = amount * ethToEurRate;
-    const kycRequired = eurAmount > 1000;
+    // Check KYC for investments > $1000
+    // Use real-time ETH price or fallback to 2500 if not available
+    const ethToUsdRate = ethPriceInUsd || 2500;
+    const usdAmount = amount * ethToUsdRate;
+    const kycRequired = usdAmount > 1000;
 
     if (kycRequired && account && !isKYCVerified(account)) {
       setMessage({ 
         type: 'error', 
-        text: 'Identity verification is required for investments over €1,000. Please verify your identity in your profile.' 
+        text: 'Identity verification is required for investments over $1,000. Please verify your identity in your profile.' 
       });
       return;
     }
@@ -251,10 +301,10 @@ function InvestmentOptionsWithContract() {
       return;
     }
 
-    // Convert EUR to ETH using real-time rate
-    // Use real-time ETH price or fallback to 25000 if not available
-    const ethToEurRate = ethPriceInEur || 25000;
-    const ethAmount = (amount / ethToEurRate).toFixed(6);
+    // Convert USD to ETH using real-time rate
+    // Use real-time ETH price or fallback to 2500 if not available
+    const ethToUsdRate = ethPriceInUsd || 2500;
+    const ethAmount = (amount / ethToUsdRate).toFixed(6);
 
     setIsInvesting(true);
     setMessage(null);
@@ -265,38 +315,44 @@ function InvestmentOptionsWithContract() {
         type: 'investment',
         status: 'completed',
         amount: ethAmount,
-        currency: 'EUR',
-        description: `Investment of €${amount.toFixed(2)}${selectedAsset ? ` in ${selectedAsset.name}` : ''}`,
+        currency: 'USD',
+        description: `Investment of $${amount.toFixed(2)}${selectedAsset ? ` in ${selectedAsset.name}` : ''}`,
         paymentMethod: 'card',
         stripeSessionId: paymentIntentId,
         metadata: {
           assetName: selectedAsset?.name,
           assetSymbol: selectedAsset?.symbol,
-          eurAmount: amount,
+          usdAmount: amount,
           ethAmount: ethAmount,
         },
       });
 
       // Add to portfolio
+      const portfolioType = selectedAsset.category === 'crypto' ? 'crypto' : 
+                           selectedAsset.category === 'stocks' ? 'stock' : 
+                           selectedAsset.category === 'commodities' ? 'commodity' : 
+                           'stock'; // Default for cloud-storage and innovative-projects
+      
       addToPortfolio(account, {
         symbol: selectedAsset.symbol,
         name: selectedAsset.name,
-        type: 'investment',
+        type: portfolioType,
         quantity: parseFloat(ethAmount),
         purchasePrice: parseFloat(ethAmount),
         currentPrice: parseFloat(ethAmount),
         totalCost: parseFloat(ethAmount),
         purchaseDate: Date.now(),
+        currency: 'USD',
         interestEarned: 0,
       });
 
-      showSuccess(`Successfully invested €${amount.toFixed(2)} (${ethAmount} ETH) in ${selectedAsset.name}!`);
-      setMessage({ type: 'success', text: `Successfully invested €${amount.toFixed(2)}!` });
+      showSuccess(`Successfully invested $${amount.toFixed(2)} (${ethAmount} ETH) in ${selectedAsset.name}!`);
+      setMessage({ type: 'success', text: `Successfully invested $${amount.toFixed(2)}!` });
       setInvestmentAmount('');
       await loadUserData();
     } catch (error: unknown) {
       const { message } = handleError(error);
-      logger.error('Error processing card payment', error, { assetId, amount });
+      logger.error('Error processing card payment', error, { assetId: selectedAsset?.id, amount });
       showError(message || 'Failed to process investment');
       setMessage({ type: 'error', text: message || 'Failed to process investment' });
     } finally {
@@ -321,20 +377,20 @@ function InvestmentOptionsWithContract() {
     <section className="relative py-20">
       <div className="absolute inset-0 bg-black/80 backdrop-blur-sm"></div>
       <div className="relative">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="max-w-[98%] mx-auto px-2 sm:px-3 lg:px-4">
         <div className="text-center mb-16">
           <h2 className="text-4xl md:text-5xl font-bold text-accent-yellow mb-4">
             Investment Options
           </h2>
           <p className="text-xl text-primary-gray-lighter max-w-2xl mx-auto">
-            Choose from a variety of tokenized assets. Start with as little as {minInvestment || '0.004'} ETH (~€10).
+            Choose from a variety of tokenized assets. Start with as little as {minInvestment || '0.004'} ETH (~$10).
           </p>
           
           {/* ETH Price Display */}
-          {ethPriceInEur && (
+          {ethPriceInUsd && (
             <div className="mt-4 text-sm text-primary-gray-lighter">
               <span className="text-accent-yellow font-medium">Current ETH Price: </span>
-              <span>€{ethPriceInEur.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              <span>${ethPriceInUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
               {ethPriceLoading && (
                 <span className="ml-2 text-xs text-primary-gray-lighter">(updating...)</span>
               )}
@@ -436,12 +492,11 @@ function InvestmentOptionsWithContract() {
           {filteredAssets.map((asset) => (
             <div
               key={asset.id}
-              onClick={() => setSelectedAsset(asset)}
-              className={`p-6 border-2 rounded-xl cursor-pointer transition-all duration-200 transform hover:scale-[1.02] ${
-                selectedAsset?.id === asset.id
-                  ? 'border-accent-yellow bg-primary-gray shadow-lg'
-                  : 'border-primary-gray-light hover:border-accent-yellow hover:shadow-xl bg-black'
-              }`}
+              onClick={() => {
+                // Navigate to asset detail page
+                router.push(`/assets/${asset.symbol.toLowerCase()}`);
+              }}
+              className="p-6 border-2 rounded-xl cursor-pointer transition-all duration-200 transform hover:scale-[1.02] border-primary-gray-light hover:border-accent-yellow hover:shadow-xl bg-black"
             >
               <div className="flex items-center justify-between mb-4">
                 <div>
@@ -461,17 +516,47 @@ function InvestmentOptionsWithContract() {
                 className="text-2xl font-bold text-accent-yellow mb-2"
                 suppressHydrationWarning
               >
-                €{asset.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                ${asset.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
               <div className="text-sm text-primary-gray-lighter">
-                Min: €{asset.minInvestment}
+                Min: ${asset.minInvestment}
               </div>
               {pricesLoading && asset.priceData && (
                 <div className="mt-2 text-xs text-primary-gray-lighter">Updating...</div>
               )}
+              {asset.category === 'stocks' && !asset.priceData && !pricesLoading && (
+                <div className="mt-2 text-xs text-yellow-400/70 flex items-center gap-1">
+                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                  </svg>
+                  Price may not be real-time
+                </div>
+              )}
+              <div className="mt-4 pt-4 border-t border-primary-gray-light">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setAssetForQuickView(asset);
+                    setQuickViewModalOpen(true);
+                  }}
+                  className="w-full py-2 bg-accent-yellow text-black font-semibold rounded-lg hover:bg-accent-yellow-light transition-colors"
+                >
+                  Quick View
+                </button>
+              </div>
             </div>
           ))}
         </div>
+
+        {/* Quick View Modal */}
+        <QuickViewModal
+          asset={assetForQuickView}
+          isOpen={quickViewModalOpen}
+          onClose={() => {
+            setQuickViewModalOpen(false);
+            setAssetForQuickView(null);
+          }}
+        />
 
         {/* Investment Form */}
         {selectedAsset && (
@@ -509,14 +594,14 @@ function InvestmentOptionsWithContract() {
                   >
                     <div className="text-lg mb-1">💳</div>
                     <div className="font-semibold text-white text-sm">Card</div>
-                    <div className="text-xs text-primary-gray-lighter">EUR</div>
+                    <div className="text-xs text-primary-gray-lighter">USD</div>
                   </button>
                 </div>
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-primary-gray-lighter mb-2">
-                  Investment Amount {paymentMethod === 'wallet' ? '(ETH)' : '(EUR)'}
+                  Investment Amount {paymentMethod === 'wallet' ? '(ETH)' : '(USD)'}
                 </label>
                 <input
                   type="number"
@@ -551,7 +636,7 @@ function InvestmentOptionsWithContract() {
                         setValidationError(
                           paymentMethod === 'wallet'
                             ? `Minimum investment is ${minAmount} ETH`
-                            : `Minimum investment is €${minAmount}`
+                            : `Minimum investment is $${minAmount}`
                         );
                         return;
                       }
@@ -565,7 +650,7 @@ function InvestmentOptionsWithContract() {
                   }}
                   placeholder={paymentMethod === 'wallet' 
                     ? `Minimum: ${minInvestment || '0.004'} ETH`
-                    : 'Minimum: €10'}
+                    : 'Minimum: $10'}
                   min={paymentMethod === 'wallet' ? (minInvestment || 0.004) : 10}
                   step={paymentMethod === 'wallet' ? '0.001' : '0.01'}
                   className={`w-full px-4 py-3 bg-black border rounded-lg focus:ring-2 focus:ring-accent-yellow focus:border-accent-yellow text-white ${
@@ -586,10 +671,10 @@ function InvestmentOptionsWithContract() {
                 {!validationError && (
                   <p className="mt-1 text-xs text-primary-gray-lighter">
                     Minimum: {paymentMethod === 'wallet' 
-                      ? ethPriceInEur 
-                        ? `${minInvestment || '0.004'} ETH (~€${((parseFloat(minInvestment || '0.004')) * ethPriceInEur).toFixed(2)})`
-                        : `${minInvestment || '0.004'} ETH (~€10)`
-                      : '€10'}
+                      ? ethPriceInUsd 
+                        ? `${minInvestment || '0.004'} ETH (~$${((parseFloat(minInvestment || '0.004')) * ethPriceInUsd).toFixed(2)})`
+                        : `${minInvestment || '0.004'} ETH (~$10)`
+                      : '$10'}
                   </p>
                 )}
               </div>
@@ -600,8 +685,8 @@ function InvestmentOptionsWithContract() {
                     <span>Your Investment:</span>
                     <span className="font-medium text-white">
                       {paymentMethod === 'wallet' 
-                        ? `${investmentAmount} ETH${ethPriceInEur ? ` (~€${(parseFloat(investmentAmount) * ethPriceInEur).toFixed(2)})` : ''}`
-                        : `€${investmentAmount}${ethPriceInEur ? ` (~${(parseFloat(investmentAmount) / ethPriceInEur).toFixed(6)} ETH)` : ''}`}
+                        ? `${investmentAmount} ETH${ethPriceInUsd ? ` (~$${(parseFloat(investmentAmount) * ethPriceInUsd).toFixed(2)})` : ''}`
+                        : `$${investmentAmount}${ethPriceInUsd ? ` (~${(parseFloat(investmentAmount) / ethPriceInUsd).toFixed(6)} ETH)` : ''}`}
                     </span>
                   </div>
                   <div className="flex justify-between text-sm text-primary-gray-lighter mb-2">
@@ -613,7 +698,7 @@ function InvestmentOptionsWithContract() {
                     <span className="font-medium text-accent-yellow">
                       {paymentMethod === 'wallet'
                         ? `${((parseFloat(investmentAmount) * poolStats.interestRate) / 100).toFixed(6)} ETH`
-                        : `€${((parseFloat(investmentAmount) * poolStats.interestRate) / 100).toFixed(2)}`}
+                        : `$${((parseFloat(investmentAmount) * poolStats.interestRate) / 100).toFixed(2)}`}
                     </span>
                   </div>
                   <div className="text-xs text-primary-gray-lighter">
@@ -625,12 +710,12 @@ function InvestmentOptionsWithContract() {
               {/* Payment Form or Invest Button */}
               {(() => {
                 const amount = parseFloat(investmentAmount || '0');
-                // Use real-time ETH price or fallback to 25000 if not available
-                const ethToEurRate = ethPriceInEur || 25000;
-                const eurAmount = paymentMethod === 'wallet' 
-                  ? amount * ethToEurRate 
+                // Use real-time ETH price or fallback to 2500 if not available
+                const ethToUsdRate = ethPriceInUsd || 2500;
+                const usdAmount = paymentMethod === 'wallet' 
+                  ? amount * ethToUsdRate 
                   : amount;
-                const kycRequired = eurAmount > 1000;
+                const kycRequired = usdAmount > 1000;
                 const isVerified = account ? isKYCVerified(account) : false;
                 const isUserLoggedIn = account && (isConnected || user?.authType === 'google');
 
@@ -663,7 +748,7 @@ function InvestmentOptionsWithContract() {
                     return (
                       <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
                         <p className="text-red-300 text-sm font-medium mb-1">Amount below minimum</p>
-                        <p className="text-red-300/80 text-xs">Minimum investment is €10</p>
+                        <p className="text-red-300/80 text-xs">Minimum investment is $10</p>
                       </div>
                     );
                   }
@@ -672,7 +757,7 @@ function InvestmentOptionsWithContract() {
                     return (
                       <div className="p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
                         <p className="text-yellow-300 text-sm font-medium mb-1">Amount is very large</p>
-                        <p className="text-yellow-300/80 text-xs">For investments over €1,000,000, please contact support</p>
+                        <p className="text-yellow-300/80 text-xs">For investments over $1,000,000, please contact support</p>
                       </div>
                     );
                   }
@@ -681,7 +766,7 @@ function InvestmentOptionsWithContract() {
                     return (
                       <KYCGate 
                         requiredAmount={1000}
-                        message={`To invest €${amount.toFixed(2)}, identity verification is required. This helps us comply with financial regulations and protect all users.`}
+                        message={`To invest $${amount.toFixed(2)}, identity verification is required. This helps us comply with financial regulations and protect all users.`}
                       >
                         <CardPaymentForm
                           amount={amount}
@@ -709,7 +794,7 @@ function InvestmentOptionsWithContract() {
                           </div>
                         </div>
                       )}
-                      {!kycRequired && amount > 0 && eurAmount > 500 && (
+                      {!kycRequired && amount > 0 && usdAmount > 500 && (
                         <div className="p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg mb-4">
                           <div className="flex items-start gap-2 text-sm text-yellow-300">
                             <svg className="w-5 h-5 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -717,7 +802,7 @@ function InvestmentOptionsWithContract() {
                             </svg>
                             <div>
                               <p className="font-medium mb-1">Identity verification recommended</p>
-                              <p className="text-xs text-yellow-300/80">For investments over €1,000, identity verification is required. Consider verifying now to avoid delays.</p>
+                              <p className="text-xs text-yellow-300/80">For investments over $1,000, identity verification is required. Consider verifying now to avoid delays.</p>
                             </div>
                           </div>
                         </div>
@@ -741,7 +826,7 @@ function InvestmentOptionsWithContract() {
                   return (
                     <KYCGate 
                       requiredAmount={1000}
-                      message={`To invest ${amount.toFixed(4)} ETH (~€${eurAmount.toFixed(2)}), identity verification is required. This helps us comply with financial regulations and protect all users.`}
+                      message={`To invest ${amount.toFixed(4)} ETH (~$${usdAmount.toFixed(2)}), identity verification is required. This helps us comply with financial regulations and protect all users.`}
                     >
                       <button
                         onClick={handleInvest}
@@ -770,7 +855,7 @@ function InvestmentOptionsWithContract() {
                         </div>
                       </div>
                     )}
-                    {!kycRequired && amount > 0 && eurAmount > 500 && (
+                    {!kycRequired && amount > 0 && usdAmount > 500 && (
                       <div className="p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg mb-4">
                         <div className="flex items-start gap-2 text-sm text-yellow-300">
                           <svg className="w-5 h-5 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -778,7 +863,7 @@ function InvestmentOptionsWithContract() {
                           </svg>
                           <div>
                             <p className="font-medium mb-1">Identity verification recommended</p>
-                            <p className="text-xs text-yellow-300/80">For investments over €1,000, identity verification is required. Consider verifying now to avoid delays.</p>
+                            <p className="text-xs text-yellow-300/80">For investments over $1,000, identity verification is required. Consider verifying now to avoid delays.</p>
                           </div>
                         </div>
                       </div>

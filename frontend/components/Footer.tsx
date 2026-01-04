@@ -2,9 +2,12 @@
 
 import Link from 'next/link';
 import { useStats } from '@/hooks/useStats';
+import { useHeartbeat } from '@/hooks/useHeartbeat';
 
 export default function Footer() {
   const { data: stats, isLoading } = useStats();
+  // Send heartbeat to update user's online status
+  useHeartbeat();
 
   const formatNumber = (num: number) => {
     if (num >= 1000000) {
@@ -18,7 +21,7 @@ export default function Footer() {
 
   return (
     <footer className="bg-black text-white border-t border-primary-gray">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <div className="max-w-[98%] mx-auto px-2 sm:px-3 lg:px-4 py-12">
         {/* Stats Section */}
         <div className="mb-8 pb-8 border-b border-primary-gray-light">
           <div className="flex flex-wrap items-center justify-center gap-6 text-sm text-primary-gray-lighter">
@@ -54,8 +57,13 @@ export default function Footer() {
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
           <div>
-            <h3 className="text-xl font-bold mb-1 text-accent-yellow">El Toro Negro</h3>
-            <p className="text-primary-gray-lighter text-xs mb-4">investment platform for people, for the future</p>
+            <div className="mb-2">
+              <img 
+                src="/logo.png" 
+                alt="El Toro Negro Logo" 
+                className="h-32 object-contain"
+              />
+            </div>
             <p className="text-primary-gray-lighter text-sm">
               Your trusted investment platform for tokenized assets.
             </p>
@@ -66,6 +74,7 @@ export default function Footer() {
               <li><Link href="/" className="hover:text-accent-yellow transition-colors">Invest</Link></li>
               <li><Link href="/buy-tokens" className="hover:text-accent-yellow transition-colors">Buy Tokens</Link></li>
               <li><Link href="/mission" className="hover:text-accent-yellow transition-colors">Mission</Link></li>
+              <li><Link href="/news" className="hover:text-accent-yellow transition-colors">News</Link></li>
               <li><Link href="/lottery" className="hover:text-accent-yellow transition-colors">Lottery</Link></li>
               <li><Link href="/btc-bets" className="hover:text-accent-yellow transition-colors">BTC Bets</Link></li>
             </ul>

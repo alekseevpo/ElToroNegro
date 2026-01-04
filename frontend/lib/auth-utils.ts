@@ -5,7 +5,7 @@
  * Implements message signing with nonce and timestamp for replay attack prevention
  */
 
-import { ethers } from 'ethers';
+import { BrowserProvider, verifyMessage } from 'ethers';
 
 export interface AuthMessage {
   message: string;
@@ -77,7 +77,7 @@ export async function verifySignature(
 ): Promise<boolean> {
   try {
     // Recover the address from the signature
-    const recoveredAddress = ethers.verifyMessage(message, signature);
+    const recoveredAddress = verifyMessage(message, signature);
     
     // Compare addresses (case-insensitive)
     return recoveredAddress.toLowerCase() === address.toLowerCase();
@@ -190,7 +190,7 @@ export function clearSession(): void {
  * Request signature from wallet
  */
 export async function requestSignature(
-  provider: ethers.BrowserProvider,
+  provider: BrowserProvider,
   message: string
 ): Promise<string> {
   try {

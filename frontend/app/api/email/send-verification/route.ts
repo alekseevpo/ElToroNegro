@@ -124,9 +124,9 @@ export async function POST(request: NextRequest) {
           from: fromEmail,
         });
 
-        // Save verification token to database (use profile address, not userId)
-        const profileAddress = profile.address || userId;
-        await setEmailVerifiedInDB(profileAddress, false, token);
+        // Save verification token to database
+        // userId is the user's address/identifier
+        await setEmailVerifiedInDB(userId, false, token);
 
         // Return success (don't return token for security)
         return NextResponse.json({
@@ -157,9 +157,9 @@ export async function POST(request: NextRequest) {
     console.log('4. (Optional) Add RESEND_FROM_EMAIL=your-verified-domain@yourdomain.com');
     console.log('5. Restart the development server after adding the key\n');
 
-    // Save verification token to database even in development mode (use profile address, not userId)
-    const profileAddress = profile.address || userId;
-    await setEmailVerifiedInDB(profileAddress, false, token);
+    // Save verification token to database even in development mode
+    // userId is the user's address/identifier
+    await setEmailVerifiedInDB(userId, false, token);
 
     // Return token for development (so frontend can test verification flow)
     return NextResponse.json({

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 
 /**
@@ -10,6 +10,13 @@ import { useAuth } from '@/contexts/AuthContext';
 export function useHeartbeat() {
   const { user } = useAuth();
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const lastHeartbeatRef = useRef<number>(0);
+  
+  // Memoize user data to prevent unnecessary re-renders
+  const userKey = useMemo(() => {
+    if (!user) return null;
+    return `${user.address}_${user.isConnected ? '1' : '0'}_${user.authType || 'none'}`;
+  }, [user?.address, user?.isConnected, user?.authType]);
 
   useEffect(() => {
     if (!user || !user.isConnected) {
@@ -18,11 +25,25 @@ export function useHeartbeat() {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
       }
+      lastHeartbeatRef.current = 0;
       return;
     }
 
-    // Send initial heartbeat immediately
+    // Prevent multiple intervals from being created
+    if (intervalRef.current) {
+      return;
+    }
+
+    // Send initial heartbeat immediately (but only if enough time has passed)
     const sendHeartbeat = async () => {
+      const now = Date.now();
+      // Throttle: don't send heartbeat more than once per 30 seconds
+      if (now - lastHeartbeatRef.current < 30000) {
+        return;
+      }
+      
+      lastHeartbeatRef.current = now;
+      
       try {
         const body: { address?: string; email?: string; authType?: string; name?: string } = {};
         
@@ -45,7 +66,10 @@ export function useHeartbeat() {
         });
       } catch (error) {
         // Silently fail - heartbeat is not critical
-        console.debug('Heartbeat failed:', error);
+        // Only log if it's not a network error (which is expected during development)
+        if (!(error instanceof TypeError && error.message.includes('fetch'))) {
+          console.debug('Heartbeat failed:', error);
+        }
       }
     };
 
@@ -62,7 +86,8 @@ export function useHeartbeat() {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
       }
+      lastHeartbeatRef.current = 0;
     };
-  }, [user]);
+  }, [userKey]); // Use userKey instead of user object to prevent unnecessary re-renders
 }
 

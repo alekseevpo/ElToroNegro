@@ -1,16 +1,22 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import WalletButton from './WalletButton';
-import LoginModal from './LoginModal';
 import KYCBadge from './KYCBadge';
 import { useAuth } from '@/contexts/AuthContext';
+
+// Lazy load LoginModal - only load when needed
+const LoginModal = dynamic(() => import('./LoginModal'), {
+  ssr: false,
+});
 
 export default function Header() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+  const [loginModalMode, setLoginModalMode] = useState<'login' | 'signup'>('login');
   const router = useRouter();
   const pathname = usePathname();
   const { user } = useAuth();
@@ -27,30 +33,34 @@ export default function Header() {
     };
   }, []);
 
-  // Base navigation items
-  const baseNavigation = [
+  // Base navigation items (Dashboard removed - now shown as button next to user name)
+  const navigation = [
     { name: 'Invest', href: '/' },
     { name: 'Buy Tokens', href: '/buy-tokens' },
     { name: 'Mission', href: '/mission' },
+    { name: 'News', href: '/news' },
     { name: 'Lottery', href: '/lottery' },
     { name: 'BTC Bets', href: '/btc-bets' },
   ];
-
-  // Add Dashboard as first item if user is authenticated
-  const navigation = user?.isConnected
-    ? [{ name: 'Dashboard', href: '/dashboard' }, ...baseNavigation]
-    : baseNavigation;
 
   const isActive = (href: string) => pathname === href;
 
   return (
     <header className="sticky top-0 z-50 bg-black/80 backdrop-blur-md border-b border-primary-gray">
-      <nav className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8" aria-label="Top">
+      <nav className="max-w-[98%] mx-auto px-2 sm:px-3 lg:px-4" aria-label="Top">
         <div className="w-full py-4 flex items-center justify-between">
           <div className="flex items-center">
-            <Link href="/" className="flex flex-col items-start">
-              <span className="text-2xl font-bold text-accent-yellow">El Toro Negro</span>
-              <span className="text-xs text-primary-gray-lighter mt-0.5">investment platform for people, for the future</span>
+            <Link href="/" className="flex items-center space-x-3 hover:opacity-80 transition-opacity">
+              <img 
+                src="/logo.png" 
+                alt="El Toro Negro Logo" 
+                className="h-24 object-contain"
+                onError={(e) => {
+                  // Fallback to text if image fails to load
+                  const target = e.target as HTMLImageElement;
+                  target.style.display = 'none';
+                }}
+              />
             </Link>
           </div>
 
@@ -73,14 +83,43 @@ export default function Header() {
 
           <div className="flex items-center space-x-4">
             {!user?.isConnected && (
-              <button
-                onClick={() => setIsLoginModalOpen(true)}
-                className="px-4 py-2 text-sm font-medium text-primary-gray-lighter hover:text-accent-yellow transition-colors"
-              >
-                Log In
-              </button>
+              <>
+                <button
+                  onClick={() => {
+                    setLoginModalMode('login');
+                    setIsLoginModalOpen(true);
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-primary-gray-lighter hover:text-accent-yellow transition-colors"
+                >
+                  Log In
+                </button>
+                <button
+                  onClick={() => {
+                    setLoginModalMode('signup');
+                    setIsLoginModalOpen(true);
+                  }}
+                  className="px-4 py-2 text-sm font-medium bg-accent-yellow/20 text-accent-yellow hover:bg-accent-yellow/30 rounded-lg transition-colors"
+                >
+                  Sign In
+                </button>
+              </>
             )}
-            {user?.isConnected && <KYCBadge showText={false} size="sm" />}
+            {user?.isConnected && (
+              <>
+                {/* Dashboard button - small yellow button */}
+                <Link
+                  href="/dashboard"
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${
+                    isActive('/dashboard')
+                      ? 'bg-accent-yellow text-black'
+                      : 'bg-accent-yellow/80 text-black hover:bg-accent-yellow'
+                  }`}
+                >
+                  Dashboard
+                </Link>
+                <KYCBadge showText={false} size="sm" />
+              </>
+            )}
             <WalletButton />
             
             {/* Mobile menu button */}
@@ -128,7 +167,11 @@ export default function Header() {
           </div>
         )}
       </nav>
-      <LoginModal isOpen={isLoginModalOpen} onClose={() => setIsLoginModalOpen(false)} />
+      <LoginModal 
+        isOpen={isLoginModalOpen} 
+        onClose={() => setIsLoginModalOpen(false)}
+        mode={loginModalMode}
+      />
     </header>
   );
 }
