@@ -5,7 +5,8 @@ import Link from 'next/link';
 export default function Hero() {
   return (
     <section className="relative overflow-hidden">
-      <div className="absolute inset-0 bg-black/80 backdrop-blur-sm"></div>
+      <div className="absolute inset-0 bg-gradient-to-br from-black via-primary-gray to-black"></div>
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_40%,rgba(255,193,7,0.18),transparent_70%)]"></div>
       <div className="relative max-w-[98%] mx-auto px-2 sm:px-3 lg:px-4 py-20 lg:py-32">
         <div className="text-center">
           <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold text-accent-yellow mb-6 tracking-tight">

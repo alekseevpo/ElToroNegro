@@ -32,7 +32,7 @@ export default function RootLayout({
           defer
         />
       </head>
-      <body className="antialiased bg-white text-gray-900" suppressHydrationWarning>
+      <body className="antialiased bg-black text-white" suppressHydrationWarning>
         <AnimatedGradientBackground />
         <ErrorBoundary>
           <QueryProvider>
