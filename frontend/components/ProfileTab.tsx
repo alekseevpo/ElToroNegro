@@ -40,7 +40,7 @@ export default function ProfileTab({ account }: ProfileTabProps) {
   const [passwordInput, setPasswordInput] = useState('');
   const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
   const [referralCodeInput, setReferralCodeInput] = useState('');
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [message, setMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
   const [connectingWallet, setConnectingWallet] = useState<string | null>(null);
   const [connectingSocial, setConnectingSocial] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<'profile' | 'kyc'>('profile');
@@ -584,6 +584,8 @@ export default function ProfileTab({ account }: ProfileTabProps) {
         <div className={`p-4 rounded-xl ${
           message.type === 'success'
             ? 'bg-green-500/10 border border-green-500/30 text-green-400'
+            : message.type === 'info'
+            ? 'bg-blue-500/10 border border-blue-500/30 text-blue-400'
             : 'bg-red-500/10 border border-red-500/30 text-red-400'
         }`}>
           {message.text}
