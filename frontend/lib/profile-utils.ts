@@ -9,7 +9,7 @@ export interface Transaction {
   type: 'token_purchase' | 'investment' | 'withdrawal' | 'lottery_ticket' | 'btc_bet';
   status: 'pending' | 'completed' | 'failed';
   amount: string; // Amount in EUR or ETH
-  currency: 'EUR' | 'ETH' | 'TAI';
+  currency: 'EUR' | 'ETH' | 'TAI' | 'USD' | string;
   tokensAmount?: string; // Amount of tokens (for token purchases)
   description: string;
   timestamp: number;
