@@ -11,8 +11,15 @@ interface LogContext {
   [key: string]: unknown;
 }
 
+declare const process: {
+  env: {
+    NODE_ENV?: string;
+    [key: string]: string | undefined;
+  };
+};
+
 class Logger {
-  private isDevelopment = process.env.NODE_ENV === 'development';
+  private isDevelopment = typeof process !== 'undefined' && process.env.NODE_ENV === 'development';
 
   private log(level: LogLevel, message: string, context?: LogContext): void {
     const timestamp = new Date().toISOString();
@@ -51,34 +58,63 @@ class Logger {
     }
   }
 
-  debug(message: string, context?: LogContext): void {
-    if (this.isDevelopment) {
-      this.log('debug', message, context);
+  private processLogArgs(
+    level: LogLevel,
+    message: string,
+    errorOrContext?: Error | unknown | LogContext,
+    context?: LogContext
+  ): void {
+    if (context !== undefined) {
+      const error = errorOrContext;
+      const errorContext: LogContext = {
+        ...context,
+        ...(error instanceof Error && {
+          error: {
+            name: error.name,
+            message: error.message,
+            stack: error.stack,
+          },
+        }),
+        ...(typeof error === 'object' && error !== null && !(error instanceof Error) && { error }),
+      };
+      this.log(level, message, errorContext);
+    } else if (errorOrContext instanceof Error) {
+      this.log(level, message, {
+        error: {
+          name: errorOrContext.name,
+          message: errorOrContext.message,
+          stack: errorOrContext.stack,
+        },
+      });
+    } else {
+      this.log(level, message, errorOrContext as LogContext);
     }
   }
 
-  info(message: string, context?: LogContext): void {
-    this.log('info', message, context);
+  debug(message: string, context?: LogContext): void;
+  debug(message: string, error: Error | unknown, context?: LogContext): void;
+  debug(message: string, errorOrContext?: Error | unknown | LogContext, context?: LogContext): void {
+    if (this.isDevelopment) {
+      this.processLogArgs('debug', message, errorOrContext, context);
+    }
   }
 
-  warn(message: string, context?: LogContext): void {
-    this.log('warn', message, context);
+  info(message: string, context?: LogContext): void;
+  info(message: string, error: Error | unknown, context?: LogContext): void;
+  info(message: string, errorOrContext?: Error | unknown | LogContext, context?: LogContext): void {
+    this.processLogArgs('info', message, errorOrContext, context);
   }
 
-  error(message: string, error?: Error | unknown, context?: LogContext): void {
-    const errorContext: LogContext = {
-      ...context,
-      ...(error instanceof Error && {
-        error: {
-          name: error.name,
-          message: error.message,
-          stack: error.stack,
-        },
-      }),
-      ...(typeof error === 'object' && error !== null && { error }),
-    };
+  warn(message: string, context?: LogContext): void;
+  warn(message: string, error: Error | unknown, context?: LogContext): void;
+  warn(message: string, errorOrContext?: Error | unknown | LogContext, context?: LogContext): void {
+    this.processLogArgs('warn', message, errorOrContext, context);
+  }
 
-    this.log('error', message, errorContext);
+  error(message: string, context?: LogContext): void;
+  error(message: string, error: Error | unknown, context?: LogContext): void;
+  error(message: string, errorOrContext?: Error | unknown | LogContext, context?: LogContext): void {
+    this.processLogArgs('error', message, errorOrContext, context);
   }
 }
 
