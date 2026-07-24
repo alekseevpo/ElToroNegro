@@ -3,13 +3,19 @@ import Stripe from 'stripe';
 import { addTransactionToDB, addAssetToPortfolioInDB } from '@/lib/db-profile-utils';
 import { logger } from '@/lib/logger';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
-  apiVersion: '2025-12-15.clover',
-});
+const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+const stripe = stripeSecretKey
+  ? new Stripe(stripeSecretKey, {
+      apiVersion: '2025-12-15.clover',
+    })
+  : null;
 
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET || '';
 
 export async function POST(request: NextRequest) {
+  if (!stripe) {
+    return NextResponse.json({ error: 'Stripe is not configured' }, { status: 503 });
+  }
   const body = await request.text();
   const signature = request.headers.get('stripe-signature');
 

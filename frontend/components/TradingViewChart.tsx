@@ -157,10 +157,10 @@ export default function TradingViewChart({
     } else {
       // Script already exists, wait for it to load
       if ((window as any).TradingView) {
-        script.onload?.();
+        script.onload?.(new Event('load'));
       } else {
         existingScript.addEventListener('load', () => {
-          script.onload?.();
+          script.onload?.(new Event('load'));
         });
       }
     }

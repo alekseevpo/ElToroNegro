@@ -1,16 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 // Email verification is handled via API, no need for localStorage
 import Link from 'next/link';
 
-/**
- * Email Verification Page
- * Handles email verification token from verification link
- */
-export default function VerifyEmailPage() {
+export const dynamic = 'force-dynamic';
+
+function VerifyEmailContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user, loading } = useAuth();
@@ -326,6 +324,18 @@ export default function VerifyEmailPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function VerifyEmailPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-black p-4">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-accent-yellow mx-auto"></div>
+      </div>
+    }>
+      <VerifyEmailContent />
+    </Suspense>
   );
 }
 

@@ -19,8 +19,9 @@ interface User {
   address: string;
   balance: string;
   isConnected: boolean;
-  authType?: 'wallet' | 'google' | 'ton';
+  authType?: 'wallet' | 'google' | 'ton' | 'email';
   name?: string;
+  email?: string;
   picture?: string;
 }
 
