@@ -29,9 +29,11 @@ const CRYPTO_MAPPING: Record<string, string> = {
 async function fetchHistoricalDataServer(
   symbol: string,
   category: 'stocks' | 'commodities' | 'crypto',
-  days: number = 30
+  days: number = 30,
+  request?: NextRequest
 ): Promise<Array<{ date: string; price: number; timestamp: number }> | null> {
   try {
+    const origin = request ? request.nextUrl.origin : '';
     if (category === 'crypto') {
       const coinId = CRYPTO_MAPPING[symbol.toUpperCase()];
       if (!coinId) return null;
@@ -119,7 +121,7 @@ async function fetchHistoricalDataServer(
       // Try Bybit xStocks API for historical data
       try {
         const bybitResponse = await fetch(
-          `${request.nextUrl.origin}/api/bybit/kline?symbol=${stockSymbol}&days=${days}`,
+          `${origin}/api/bybit/kline?symbol=${stockSymbol}&days=${days}`,
           {
             method: 'GET',
             headers: { 'Accept': 'application/json' },
@@ -147,7 +149,7 @@ async function fetchHistoricalDataServer(
         // Try Bybit TradFi API for historical data
         try {
           const bybitResponse = await fetch(
-            `${request.nextUrl.origin}/api/bybit/kline?symbol=${symbolUpper}&days=${days}`,
+            `${origin}/api/bybit/kline?symbol=${symbolUpper}&days=${days}`,
             {
               method: 'GET',
               headers: { 'Accept': 'application/json' },
@@ -221,7 +223,7 @@ export async function GET(
     }
 
     // Fetch historical data directly (server-side, no CORS)
-    const data = await fetchHistoricalDataServer(symbol.toUpperCase(), category as 'stocks' | 'commodities' | 'crypto', days);
+    const data = await fetchHistoricalDataServer(symbol.toUpperCase(), category as 'stocks' | 'commodities' | 'crypto', days, request);
 
     if (!data || data.length === 0) {
       return NextResponse.json(
