@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { useTonAddress, useTonConnectUI } from '@tonconnect/ui-react';
 import { BrowserProvider, formatEther } from 'ethers';
 import {
   createAuthMessage,
@@ -53,6 +54,75 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [provider, setProvider] = useState<BrowserProvider | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [tonConnectUI] = useTonConnectUI();
+  const tonAddress = useTonAddress();
+
+  // Listen for TON wallet status change events (including Telegram Desktop)
+  useEffect(() => {
+    if (!tonConnectUI) return;
+
+    const unsubscribe = tonConnectUI.onStatusChange((wallet) => {
+      if (wallet && wallet.account?.address) {
+        const address = wallet.account.address;
+        logger.info('TON status change event: connected', { address });
+
+        setUser({
+          address,
+          balance: '0',
+          isConnected: true,
+          authType: 'ton',
+        });
+
+        if (typeof window !== 'undefined') {
+          const tonSession = {
+            address: address.toLowerCase(),
+            walletType: 'ton',
+            connectedAt: Date.now(),
+            expiresAt: Date.now() + (7 * 24 * 60 * 60 * 1000), // 7 days
+          };
+          sessionStorage.setItem('ton_session', JSON.stringify(tonSession));
+
+          if (window.location.pathname === '/' || window.location.pathname === '') {
+            window.location.href = '/dashboard';
+          }
+        }
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [tonConnectUI]);
+
+  // Listen for TON wallet connection dynamically
+  useEffect(() => {
+    if (tonAddress) {
+      logger.info('TON Wallet connected dynamically', { address: tonAddress });
+      const formattedAddress = tonAddress.toLowerCase();
+      
+      setUser({
+        address: tonAddress,
+        balance: '0',
+        isConnected: true,
+        authType: 'ton',
+      });
+
+      if (typeof window !== 'undefined') {
+        const tonSession = {
+          address: formattedAddress,
+          walletType: 'ton',
+          connectedAt: Date.now(),
+          expiresAt: Date.now() + (7 * 24 * 60 * 60 * 1000), // 7 days
+        };
+        sessionStorage.setItem('ton_session', JSON.stringify(tonSession));
+
+        // Automatically redirect to /dashboard if connected from home page
+        if (window.location.pathname === '/' || window.location.pathname === '') {
+          window.location.href = '/dashboard';
+        }
+      }
+    }
+  }, [tonAddress]);
 
   // Проверить сохраненное соединение при загрузке
   useEffect(() => {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { TonConnectUIProvider } from '@tonconnect/ui-react';
+import { TonConnectUIProvider, THEME } from '@tonconnect/ui-react';
 
 export default function TonConnectProvider({ children }: { children: React.ReactNode }) {
   const [manifestUrl, setManifestUrl] = useState<string>(
@@ -23,7 +23,7 @@ export default function TonConnectProvider({ children }: { children: React.React
   return (
     <TonConnectUIProvider 
       manifestUrl={manifestUrl}
-      uiPreferences={{ theme: 'DARK' }}
+      uiPreferences={{ theme: THEME.DARK }}
     >
       {children}
     </TonConnectUIProvider>
