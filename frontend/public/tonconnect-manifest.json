@@ -1,6 +1,5 @@
 {
-  "url": "http://localhost:3000",
+  "url": "https://raw.githubusercontent.com/alekseevpo/ElToroNegro",
   "name": "El Toro Negro",
-  "iconUrl": "https://eltoronegro.com/icon.png"
+  "iconUrl": "https://raw.githubusercontent.com/alekseevpo/ElToroNegro/main/frontend/public/logo.png"
 }
-
